@@ -1,0 +1,1042 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="CutOut">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0e1014">
+<meta name="description" content="Remove a column or a row from the middle of any image, then close the gap. Like Snagit's Cut Out tool, on your phone.">
+<title>CutOut</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<style>
+  :root{
+    --bg:#0e1014; --panel:#171a21; --panel2:#1e222b; --line:#2b313d;
+    --text:#eef1f6; --dim:#98a1b2; --accent:#4da3ff; --accent2:#7bd88f;
+    --danger:#ff6b6b; --radius:14px;
+    --sat:env(safe-area-inset-top); --sab:env(safe-area-inset-bottom);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--bg); color:var(--text); overflow:hidden;
+    font:15px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    display:flex; flex-direction:column;
+    -webkit-user-select:none; user-select:none; touch-action:none;
+  }
+
+  /* ---------- top bar ---------- */
+  header{
+    display:flex; align-items:center; gap:8px;
+    padding:calc(var(--sat) + 8px) 10px 8px;
+    background:linear-gradient(180deg,#12151b,#0e1014); border-bottom:1px solid var(--line);
+    flex:0 0 auto; position:relative; z-index:5;
+  }
+  .brand{font-weight:700;letter-spacing:.3px;font-size:16px;margin-right:auto;display:flex;align-items:center;gap:7px}
+  .brand svg{display:block}
+  .brand small{font-weight:500;color:var(--dim);font-size:11px;display:block}
+
+  button{
+    font:inherit; color:var(--text); background:var(--panel2); border:1px solid var(--line);
+    border-radius:11px; padding:9px 12px; min-height:40px; cursor:pointer;
+    display:inline-flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap;
+  }
+  button:active{transform:scale(.96)}
+  button[disabled]{opacity:.32}
+  button.icon{padding:9px 11px; min-width:44px}
+  button.primary{background:var(--accent); border-color:var(--accent); color:#04203f; font-weight:700}
+  button.good{background:var(--accent2); border-color:var(--accent2); color:#062d13; font-weight:700}
+  button.ghost{background:transparent}
+
+  /* ---------- stage ---------- */
+  #stage{flex:1 1 auto; position:relative; overflow:hidden; background:
+      repeating-conic-gradient(#15181e 0 25%, #1b1f27 0 50%) 50%/22px 22px;}
+  #view{position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none}
+  #loupe{
+    position:absolute; width:132px; height:132px; border-radius:50%;
+    border:2px solid rgba(255,255,255,.85); box-shadow:0 8px 26px rgba(0,0,0,.6);
+    display:none; pointer-events:none; overflow:hidden; z-index:4; background:#000;
+  }
+  #loupe canvas{width:100%;height:100%;display:block}
+  #hint{
+    position:absolute; left:50%; top:12px; transform:translateX(-50%);
+    background:rgba(10,12,16,.82); border:1px solid var(--line); backdrop-filter:blur(8px);
+    padding:7px 13px; border-radius:999px; font-size:12.5px; color:var(--dim);
+    pointer-events:none; z-index:3; max-width:92%; text-align:center;
+  }
+  #busy{
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(8,10,13,.6); z-index:6; font-size:13px; color:var(--dim); backdrop-filter:blur(2px);
+  }
+
+  /* ---------- empty state ---------- */
+  #empty{
+    position:absolute; inset:0; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:14px; text-align:center; padding:26px; z-index:2;
+  }
+  #empty h1{font-size:21px;margin:0;font-weight:700}
+  #empty p{margin:0;color:var(--dim);max-width:330px;font-size:14px;line-height:1.55}
+  #empty .demo{margin-top:2px;opacity:.9}
+
+  /* ---------- bottom panel ---------- */
+  footer{
+    flex:0 0 auto; background:linear-gradient(180deg,#141821,#111419);
+    border-top:1px solid var(--line); padding:10px 10px calc(var(--sab) + 10px);
+    display:flex; flex-direction:column; gap:9px; z-index:5;
+  }
+  .row{display:flex; align-items:center; gap:8px}
+  .readout{
+    flex:1 1 auto; display:flex; align-items:center; justify-content:center; gap:10px;
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:7px 10px; min-height:42px; font-variant-numeric:tabular-nums;
+    white-space:nowrap; overflow:hidden;
+  }
+  .readout b{font-size:16px}
+  .readout span{color:var(--dim); font-size:12px}
+  .nudge{display:flex;gap:4px}
+  .nudge button{min-width:38px; padding:8px 6px; font-size:16px; line-height:1}
+  .seg{display:flex; background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden}
+  .seg button{border:0;border-radius:0;background:transparent;padding:8px 11px;font-size:13px;min-height:38px}
+  .seg button.on{background:var(--accent); color:#04203f; font-weight:700}
+  .chip{
+    display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);
+    border-radius:999px;padding:7px 12px;font-size:13px;color:var(--dim);min-height:38px;
+  }
+  .chip.on{color:var(--text);border-color:#3d5a80;background:#16202c}
+  select{
+    font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--line);
+    border-radius:11px;padding:8px 10px;min-height:38px;
+  }
+  .muted{color:var(--dim);font-size:12px}
+  .grow{flex:1 1 auto}
+  .hidden{display:none !important}
+
+  /* ---------- sheet ---------- */
+  #sheet{
+    position:fixed; left:0; right:0; bottom:0; z-index:20; background:var(--panel);
+    border-top:1px solid var(--line); border-radius:18px 18px 0 0;
+    padding:14px 14px calc(var(--sab) + 16px); transform:translateY(105%);
+    transition:transform .22s ease; max-height:78vh; overflow:auto;
+  }
+  #sheet.open{transform:translateY(0)}
+  #scrim{position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:19; opacity:0; pointer-events:none; transition:opacity .2s}
+  #scrim.open{opacity:1; pointer-events:auto}
+  .sheet-h{display:flex;align-items:center;margin-bottom:10px}
+  .sheet-h h2{font-size:16px;margin:0;flex:1}
+  .field{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}
+  .field:last-child{border-bottom:0}
+  .field label{flex:1;font-size:14px}
+  .field .muted{display:block;margin-top:2px}
+  input[type=range]{width:118px}
+  input[type=color]{width:44px;height:34px;padding:0;border:1px solid var(--line);border-radius:9px;background:var(--panel2)}
+  .sw{position:relative;width:50px;height:30px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);flex:0 0 auto}
+  .sw::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#7c8798;transition:.16s}
+  .sw.on{background:#1d3a5c;border-color:#3d5a80}
+  .sw.on::after{left:25px;background:var(--accent)}
+  .kbd{font:12px ui-monospace,Menlo,monospace;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:1px 5px}
+  @media (min-width:760px){ .desk{display:inline-flex !important} }
+  .desk{display:none !important}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="2" y="4" width="7" height="16" rx="1.5" fill="#4da3ff"/>
+      <rect x="15" y="4" width="7" height="16" rx="1.5" fill="#7bd88f"/>
+      <path d="M12 3.5 L10.6 6 L13.4 8.5 L10.6 11 L13.4 13.5 L10.6 16 L13.4 18.5 L12 20.5"
+            stroke="#eef1f6" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
+    </svg>
+    <div>CutOut<small>remove a column or row</small></div>
+  </div>
+  <button class="icon ghost" id="btnUndo" title="Undo" disabled>↺</button>
+  <button class="icon ghost" id="btnRedo" title="Redo" disabled>↻</button>
+  <button class="icon ghost" id="btnOrig" title="Hold to see original" disabled>👁</button>
+  <button class="good" id="btnSave" disabled>Save</button>
+</header>
+
+<div id="stage">
+  <canvas id="view"></canvas>
+  <div id="loupe"><canvas id="loupeC" width="132" height="132"></canvas></div>
+  <div id="hint" class="hidden"></div>
+  <div id="busy">analysing edges…</div>
+
+  <div id="empty">
+    <svg width="86" height="66" viewBox="0 0 86 66" fill="none" aria-hidden="true">
+      <rect x="1" y="1" width="30" height="64" rx="3" fill="#1e222b" stroke="#2b313d"/>
+      <rect x="55" y="1" width="30" height="64" rx="3" fill="#1e222b" stroke="#2b313d"/>
+      <rect x="6" y="8" width="20" height="4" rx="2" fill="#3a4356"/><rect x="6" y="18" width="20" height="4" rx="2" fill="#3a4356"/>
+      <rect x="6" y="28" width="20" height="4" rx="2" fill="#3a4356"/><rect x="6" y="38" width="20" height="4" rx="2" fill="#3a4356"/>
+      <rect x="60" y="8" width="20" height="4" rx="2" fill="#3a4356"/><rect x="60" y="18" width="20" height="4" rx="2" fill="#3a4356"/>
+      <rect x="60" y="28" width="20" height="4" rx="2" fill="#3a4356"/><rect x="60" y="38" width="20" height="4" rx="2" fill="#3a4356"/>
+      <rect x="34" y="1" width="18" height="64" rx="3" fill="#2a1c1c" stroke="#ff6b6b" stroke-dasharray="4 3"/>
+      <path d="M43 22 l0 22 M36 33 l14 0" stroke="#ff6b6b" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    <h1>Cut the middle out</h1>
+    <p>Drag a band across a photo or screenshot. CutOut deletes that strip and slides the two halves together — no visible edit.</p>
+    <div class="row demo">
+      <button class="primary" id="btnPick">Choose image</button>
+      <button id="btnPaste" class="desk">Paste</button>
+    </div>
+    <p class="muted" style="font-size:12px">Works offline. Nothing is uploaded — every pixel stays on your phone.</p>
+  </div>
+</div>
+
+<footer id="tools" class="hidden">
+  <div class="row">
+    <div class="nudge">
+      <button id="nA-" title="move left edge out">‹</button>
+      <button id="nA+" title="move left edge in">›</button>
+    </div>
+    <div class="readout" id="readout">
+      <span id="roLabel">drag across the image</span>
+    </div>
+    <div class="nudge">
+      <button id="nB-" title="move right edge in">‹</button>
+      <button id="nB+" title="move right edge out">›</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="seg" id="axisSeg">
+      <button data-axis="v" id="axV">▉ Column</button>
+      <button data-axis="h" id="axH">▤ Row</button>
+    </div>
+    <button class="ghost" id="btnClear">Clear</button>
+    <button class="primary grow" id="btnCut" disabled>✂ Cut out</button>
+    <button class="icon ghost" id="btnGear">⚙</button>
+  </div>
+</footer>
+
+<div id="scrim"></div>
+<div id="sheet">
+  <div class="sheet-h"><h2>Options</h2><button class="ghost icon" id="sheetClose">✕</button></div>
+
+  <div class="field">
+    <label>Snap to table lines
+      <span class="muted">Sticks the band to real column / row borders so the join is exact.</span></label>
+    <div class="sw on" id="swSnap"></div>
+  </div>
+
+  <div class="field">
+    <label>Seam style
+      <span class="muted">Snagit-style cut line where the halves meet. “Seamless” leaves no trace.</span></label>
+    <select id="selSeam">
+      <option value="none" selected>Seamless</option>
+      <option value="line">Thin line</option>
+      <option value="dashed">Dashed</option>
+      <option value="jagged">Jagged (torn)</option>
+      <option value="wave">Wave</option>
+    </select>
+  </div>
+
+  <div class="field" id="fSeamColor">
+    <label>Seam colour &amp; thickness</label>
+    <input type="color" id="seamColor" value="#ffffff">
+    <input type="range" id="seamWidth" min="1" max="14" step="1" value="3">
+  </div>
+
+  <div class="field">
+    <label>Save as</label>
+    <select id="selFmt">
+      <option value="auto" selected>Same as original</option>
+      <option value="image/png">PNG (sharpest)</option>
+      <option value="image/jpeg">JPEG (smaller)</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label>Start over
+      <span class="muted">Throws away every cut and restores the image you opened.</span></label>
+    <button id="btnReset">Reset</button>
+  </div>
+
+  <div class="field" style="display:block">
+    <div class="muted">
+      <b style="color:var(--text)">How to use</b><br>
+      1 finger drag = draw the band · 2 fingers = pan &amp; zoom · drag a band edge to fine-tune ·
+      arrows nudge 1 px · <b>Cut out</b> removes it. Repeat as many times as you like, then <b>Save</b>
+      to send it to Photos.<br><br>
+      <span class="desk" style="display:none">Desktop: <span class="kbd">←</span><span class="kbd">→</span> nudge,
+      <span class="kbd">Enter</span> cut, <span class="kbd">⌘Z</span> undo, <span class="kbd">⌘V</span> paste.</span>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="file" accept="image/*" style="position:fixed;left:-9999px">
+
+<script>
+(() => {
+'use strict';
+
+/* ══════════════════════════════════════════════════════════════
+   state
+   ══════════════════════════════════════════════════════════════ */
+let original = null;      // pristine canvas, natural resolution
+let work     = null;      // canvas after all applied cuts
+let ops      = [];        // [{axis,a,b,style,color,lineWidth}] applied in order
+let redo     = [];
+let band     = null;      // {axis:'v'|'h', a, b} in CURRENT work-image pixels
+let srcMime  = 'image/png';
+let srcName  = 'cutout';
+
+const view = { scale: 1, tx: 0, ty: 0 };
+const opts = { snap: true, seam: 'none', color: '#ffffff', lineWidth: 3, fmt: 'auto' };
+
+let showOriginal = false;
+let candCache = {};       // {v:[...], h:[...]} snap candidates for current work canvas
+let saveBlob  = null;     // pre-baked blob so Save can fire inside the tap gesture
+
+/* ── dom ── */
+const $ = id => document.getElementById(id);
+const stage = $('stage'), viewC = $('view'), vctx = viewC.getContext('2d');
+const loupe = $('loupe'), loupeC = $('loupeC'), lctx = loupeC.getContext('2d');
+const hintEl = $('hint'), busyEl = $('busy'), emptyEl = $('empty'), tools = $('tools');
+const readout = $('readout'), roLabel = $('roLabel');
+
+/* ══════════════════════════════════════════════════════════════
+   helpers
+   ══════════════════════════════════════════════════════════════ */
+const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
+
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+function cloneCanvas(src) {
+  const c = makeCanvas(src.width, src.height);
+  c.getContext('2d').drawImage(src, 0, 0);
+  return c;
+}
+function hint(msg, ms = 2600) {
+  hintEl.textContent = msg;
+  hintEl.classList.remove('hidden');
+  clearTimeout(hint._t);
+  if (ms) hint._t = setTimeout(() => hintEl.classList.add('hidden'), ms);
+}
+function busy(on, msg) {
+  if (msg) busyEl.textContent = msg;
+  busyEl.style.display = on ? 'flex' : 'none';
+}
+const nextFrame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+/* image px ⇄ screen px */
+const toScreenX = ix => ix * view.scale + view.tx;
+const toScreenY = iy => iy * view.scale + view.ty;
+const toImgX    = sx => (sx - view.tx) / view.scale;
+const toImgY    = sy => (sy - view.ty) / view.scale;
+
+/* ══════════════════════════════════════════════════════════════
+   loading
+   ══════════════════════════════════════════════════════════════ */
+async function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) { hint('That is not an image.'); return; }
+  busy(true, 'opening…');
+  try {
+    let bmp;
+    try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+    catch { bmp = await createImageBitmap(file); }               // Safari < 16 fallback
+
+    original = makeCanvas(bmp.width, bmp.height);
+    original.getContext('2d').drawImage(bmp, 0, 0);
+    bmp.close && bmp.close();
+
+    srcMime = (file.type === 'image/jpeg' || file.type === 'image/webp') ? file.type : 'image/png';
+    srcName = (file.name || 'image').replace(/\.[^.]+$/, '') || 'image';
+
+    ops = []; redo = []; band = null;
+    rebuild();
+    fitView();
+    emptyEl.classList.add('hidden');
+    tools.classList.remove('hidden');
+    resize();
+    hint('Drag one finger across the part you want gone.', 4200);
+  } catch (e) {
+    hint('Could not open that image.');
+    console.error(e);
+  }
+  busy(false);
+  syncUI();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   the cut itself
+   ══════════════════════════════════════════════════════════════ */
+function applyCut(src, op) {
+  const W = src.width, H = src.height;
+  const a = Math.round(op.a), b = Math.round(op.b);
+  const gap = b - a;
+  if (gap <= 0) return src;
+
+  let out;
+  if (op.axis === 'v') {
+    const nw = W - gap;
+    if (nw < 1) return src;
+    out = makeCanvas(nw, H);
+    const c = out.getContext('2d');
+    if (a > 0)  c.drawImage(src, 0, 0, a, H,       0, 0, a, H);           // left part
+    if (b < W)  c.drawImage(src, b, 0, W - b, H,   a, 0, W - b, H);       // right part slid over
+  } else {
+    const nh = H - gap;
+    if (nh < 1) return src;
+    out = makeCanvas(W, nh);
+    const c = out.getContext('2d');
+    if (a > 0)  c.drawImage(src, 0, 0, W, a,       0, 0, W, a);           // top part
+    if (b < H)  c.drawImage(src, 0, b, W, H - b,   0, a, W, H - b);       // bottom part slid up
+  }
+  drawSeam(out.getContext('2d'), op, out.width, out.height);
+  return out;
+}
+
+function drawSeam(ctx, op, W, H) {
+  const style = op.style || 'none';
+  if (style === 'none') return;
+  const lw  = op.lineWidth || 3;
+  const pos = Math.round(op.a);
+  const len = op.axis === 'v' ? H : W;
+
+  ctx.save();
+  ctx.strokeStyle = op.color || '#fff';
+  ctx.lineWidth = lw; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath();
+
+  const pt = (along, across) => op.axis === 'v'
+    ? ctx.lineTo(pos + across, along)
+    : ctx.lineTo(along, pos + across);
+  const move = (along, across) => op.axis === 'v'
+    ? ctx.moveTo(pos + across, along)
+    : ctx.moveTo(along, pos + across);
+
+  if (style === 'line' || style === 'dashed') {
+    if (style === 'dashed') ctx.setLineDash([lw * 3, lw * 2]);
+    move(0, 0); pt(len, 0);
+  } else if (style === 'jagged') {
+    const amp = lw * 1.7, period = Math.max(8, lw * 4);
+    move(0, 0);
+    for (let t = 0, i = 0; t < len; t += period, i++) pt(Math.min(t + period, len), i % 2 ? amp : -amp);
+  } else if (style === 'wave') {
+    const amp = lw * 1.6, period = Math.max(14, lw * 9);
+    move(0, 0);
+    for (let t = 0; t <= len; t += 2) pt(t, Math.sin(t / period * Math.PI * 2) * amp);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function rebuild() {
+  let c = cloneCanvas(original);
+  for (const op of ops) c = applyCut(c, op);
+  work = c;
+  candCache = {};
+  saveBlob = null;
+  bakeBlob();
+}
+
+function commitCut() {
+  if (!band) return;
+  const a = Math.round(Math.min(band.a, band.b));
+  const b = Math.round(Math.max(band.a, band.b));
+  const max = band.axis === 'v' ? work.width : work.height;
+  if (b - a < 1) { hint('That band is too thin to remove.'); return; }
+  if (b - a >= max) { hint('That would remove the whole image.'); return; }
+
+  ops.push({ axis: band.axis, a, b, style: opts.seam, color: opts.color, lineWidth: opts.lineWidth });
+  redo = [];
+  band = null;
+  rebuild();
+  clampView();
+  render();
+  syncUI();
+  hint(`Removed ${b - a} px. Cut again, or Save.`, 2000);
+}
+
+function undo() { if (!ops.length) return; redo.push(ops.pop()); band = null; rebuild(); clampView(); render(); syncUI(); }
+function redoOp() { if (!redo.length) return; ops.push(redo.pop()); band = null; rebuild(); clampView(); render(); syncUI(); }
+function reset() { if (!original) return; ops = []; redo = []; band = null; rebuild(); fitView(); syncUI(); }
+
+/* ══════════════════════════════════════════════════════════════
+   snap candidates — find real table lines / whitespace gutters
+   ══════════════════════════════════════════════════════════════ */
+function candidates(axis) {
+  if (candCache[axis]) return candCache[axis];
+  const W = work.width, H = work.height;
+  if (W * H > 40e6) return (candCache[axis] = []);            // too big, skip quietly
+
+  const N = axis === 'v' ? W : H;      // index we cut along
+  const M = axis === 'v' ? H : W;      // the perpendicular run
+  const ctx = work.getContext('2d', { willReadFrequently: true });
+
+  const score  = new Float32Array(N);
+  const uniMin = new Float32Array(N).fill(255);
+  const uniMax = new Float32Array(N).fill(0);
+  const TH = 24;                        // "this is a real edge" luminance jump
+  const STEP = Math.max(1, Math.floor(M / 700));   // sample ~700 lines, plenty
+  let samples = 0;
+
+  const CH = 256;                       // read in row-strips to bound memory
+  for (let y0 = 0; y0 < H; y0 += CH) {
+    const yStart = Math.max(0, y0 - 1);                       // 1 row overlap for h-diffs
+    const h = Math.min(CH + (y0 - yStart), H - yStart);
+    const d = ctx.getImageData(0, yStart, W, h).data;
+    const lum = (x, y) => { const i = (y * W + x) << 2; return (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000; };
+
+    if (axis === 'v') {
+      for (let y = (y0 - yStart); y < h; y += STEP) {
+        samples++;
+        let prev = lum(0, y);
+        if (prev < uniMin[0]) uniMin[0] = prev; if (prev > uniMax[0]) uniMax[0] = prev;
+        for (let x = 1; x < W; x++) {
+          const cur = lum(x, y);
+          if (Math.abs(cur - prev) > TH) score[x]++;
+          if (cur < uniMin[x]) uniMin[x] = cur;
+          if (cur > uniMax[x]) uniMax[x] = cur;
+          prev = cur;
+        }
+      }
+    } else {
+      for (let y = (y0 - yStart) ; y < h; y++) {
+        const gy = yStart + y;
+        if (gy === 0) continue;
+        let n = 0;
+        for (let x = 0; x < W; x += STEP) {
+          const cur = lum(x, y), up = lum(x, y - 1);
+          if (Math.abs(cur - up) > TH) score[gy]++;
+          if (cur < uniMin[gy]) uniMin[gy] = cur;
+          if (cur > uniMax[gy]) uniMax[gy] = cur;
+          n++;
+        }
+        samples = n;                                          // same every row
+      }
+    }
+  }
+  if (!samples) samples = 1;
+  for (let i = 0; i < N; i++) score[i] /= samples;
+
+  const out = new Set();
+
+  // 1. structural lines = an edge that repeats down most of the image.
+  //    A border is rarely 1px: a 2px rule gives two peaks with a dead pixel between
+  //    them, so group nearby hot pixels and snap to the group's centre — which for a
+  //    shared table border is exactly where you want the join to land.
+  let max = 0;
+  for (let i = 0; i < N; i++) if (score[i] > max) max = score[i];
+  const T = clamp(max * 0.5, 0.25, 0.6);
+  const GAP = 3;                        // hot pixels this close belong to one line
+  for (let i = 0; i < N; i++) {
+    if (score[i] < T) continue;
+    let j = i, last = i, wsum = 0, w = 0;
+    while (j < N && j - last <= GAP) {
+      if (score[j] >= T) { wsum += j * score[j]; w += score[j]; last = j; }
+      j++;
+    }
+    if (w > 0) out.add(Math.round(wsum / w));
+    i = last;
+  }
+
+  // 2. edges of flat gutters (the whitespace between columns / rows)
+  const flat = i => (uniMax[i] - uniMin[i]) < 7;
+  for (let i = 1; i < N; i++) if (flat(i) !== flat(i - 1)) out.add(i);
+
+  return (candCache[axis] = Array.from(out).sort((x, y) => x - y));
+}
+
+function snapValue(axis, v) {
+  if (!opts.snap) return v;
+  const list = candidates(axis);
+  if (!list.length) return v;
+  const tol = Math.max(3, 18 / view.scale);      // ~18 screen px feels right under a thumb
+  let best = v, bd = tol;
+  for (const c of list) {
+    if (c > v + tol) break;
+    const d = Math.abs(c - v);
+    if (d < bd) { bd = d; best = c; }
+  }
+  return best;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   view / render
+   ══════════════════════════════════════════════════════════════ */
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const r = stage.getBoundingClientRect();
+  viewC.width = Math.max(1, Math.round(r.width * dpr));
+  viewC.height = Math.max(1, Math.round(r.height * dpr));
+  viewC.style.width = r.width + 'px';
+  viewC.style.height = r.height + 'px';
+  vctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  render();
+}
+function stageSize() { const r = stage.getBoundingClientRect(); return { w: r.width, h: r.height }; }
+
+function fitScale() {
+  if (!work) return 1;
+  const { w, h } = stageSize();
+  return Math.min(w / work.width, h / work.height) * 0.94;
+}
+function fitView() {
+  if (!work) return;
+  const { w, h } = stageSize();
+  view.scale = fitScale();
+  view.tx = (w - work.width * view.scale) / 2;
+  view.ty = (h - work.height * view.scale) / 2;
+  render();
+}
+function clampView() {
+  if (!work) return;
+  const { w, h } = stageSize();
+  view.scale = clamp(view.scale, fitScale() * 0.5, 30);
+  const iw = work.width * view.scale, ih = work.height * view.scale;
+  const mx = Math.min(w, iw) * 0.5, my = Math.min(h, ih) * 0.5;
+  view.tx = clamp(view.tx, w / 2 - iw - mx + mx, w / 2 + mx);
+  view.tx = clamp(view.tx, w - iw - (iw > w ? 0 : (w - iw) / 2) - 40, (iw > w ? 0 : (w - iw) / 2) + 40);
+  view.ty = clamp(view.ty, h - ih - (ih > h ? 0 : (h - ih) / 2) - 40, (ih > h ? 0 : (h - ih) / 2) + 40);
+}
+
+function render() {
+  if (!work) { vctx.clearRect(0, 0, viewC.width, viewC.height); return; }
+  const { w, h } = stageSize();
+  const img = showOriginal ? original : work;
+  vctx.clearRect(0, 0, w, h);
+
+  vctx.imageSmoothingEnabled = view.scale < 1;
+  vctx.save();
+  vctx.translate(view.tx, view.ty);
+  vctx.scale(view.scale, view.scale);
+  vctx.drawImage(img, 0, 0);
+  vctx.restore();
+
+  // subtle frame
+  vctx.strokeStyle = 'rgba(255,255,255,.14)'; vctx.lineWidth = 1;
+  vctx.strokeRect(toScreenX(0) - .5, toScreenY(0) - .5, img.width * view.scale + 1, img.height * view.scale + 1);
+
+  if (showOriginal) { badge('ORIGINAL'); return; }
+  if (band) drawBand(w, h);
+}
+
+function badge(text) {
+  vctx.save();
+  vctx.font = '600 11px -apple-system,sans-serif';
+  const pad = 7, tw = vctx.measureText(text).width;
+  vctx.fillStyle = 'rgba(0,0,0,.65)';
+  vctx.fillRect(10, 10, tw + pad * 2, 22);
+  vctx.fillStyle = '#fff'; vctx.fillText(text, 10 + pad, 25);
+  vctx.restore();
+}
+
+function drawBand(w, h) {
+  const a = Math.min(band.a, band.b), b = Math.max(band.a, band.b);
+  const vert = band.axis === 'v';
+  const s1 = vert ? toScreenX(a) : toScreenY(a);
+  const s2 = vert ? toScreenX(b) : toScreenY(b);
+  const i0 = vert ? toScreenY(0) : toScreenX(0);
+  const i1 = vert ? toScreenY(work.height) : toScreenX(work.width);
+
+  vctx.save();
+
+  // snap ticks near the band
+  if (opts.snap && candCache[band.axis]) {
+    vctx.strokeStyle = 'rgba(123,216,143,.5)'; vctx.lineWidth = 1;
+    const near = 60 / view.scale;
+    for (const c of candCache[band.axis]) {
+      if (c < a - near || c > b + near) continue;
+      const sp = vert ? toScreenX(c) : toScreenY(c);
+      vctx.beginPath();
+      if (vert) { vctx.moveTo(sp, i0); vctx.lineTo(sp, i0 + 9); vctx.moveTo(sp, i1 - 9); vctx.lineTo(sp, i1); }
+      else      { vctx.moveTo(i0, sp); vctx.lineTo(i0 + 9, sp); vctx.moveTo(i1 - 9, sp); vctx.lineTo(i1, sp); }
+      vctx.stroke();
+    }
+  }
+
+  // the doomed strip
+  vctx.fillStyle = 'rgba(255,72,72,.28)';
+  if (vert) vctx.fillRect(s1, i0, s2 - s1, i1 - i0);
+  else      vctx.fillRect(i0, s1, i1 - i0, s2 - s1);
+
+  // hatching so it reads as "going away"
+  vctx.save();
+  vctx.beginPath();
+  if (vert) vctx.rect(s1, i0, s2 - s1, i1 - i0); else vctx.rect(i0, s1, i1 - i0, s2 - s1);
+  vctx.clip();
+  vctx.strokeStyle = 'rgba(255,255,255,.16)'; vctx.lineWidth = 1;
+  const lo = Math.min(s1, i0) - Math.max(w, h), hi = Math.max(s2, i1) + Math.max(w, h);
+  for (let t = lo; t < hi; t += 9) { vctx.beginPath(); vctx.moveTo(t, -h); vctx.lineTo(t + h * 2, h * 2); vctx.stroke(); }
+  vctx.restore();
+
+  // edges + grab handles
+  vctx.strokeStyle = '#ff5a5a'; vctx.lineWidth = 2;
+  for (const s of [s1, s2]) {
+    vctx.beginPath();
+    if (vert) { vctx.moveTo(s, i0); vctx.lineTo(s, i1); } else { vctx.moveTo(i0, s); vctx.lineTo(i1, s); }
+    vctx.stroke();
+  }
+  vctx.fillStyle = '#ff5a5a';
+  const mid = (i0 + i1) / 2;
+  for (const s of [s1, s2]) {
+    const cx = vert ? s : mid, cy = vert ? mid : s;
+    vctx.beginPath(); vctx.arc(cx, cy, 11, 0, 7); vctx.fill();
+    vctx.strokeStyle = '#fff'; vctx.lineWidth = 2; vctx.beginPath();
+    if (vert) { vctx.moveTo(cx, cy - 5); vctx.lineTo(cx, cy + 5); } else { vctx.moveTo(cx - 5, cy); vctx.lineTo(cx + 5, cy); }
+    vctx.stroke(); vctx.strokeStyle = '#ff5a5a';
+  }
+  vctx.restore();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   loupe
+   ══════════════════════════════════════════════════════════════ */
+function showLoupe(imgX, imgY, screenX, screenY) {
+  const Z = 7, S = 132;
+  lctx.imageSmoothingEnabled = false;
+  lctx.fillStyle = '#000'; lctx.fillRect(0, 0, S, S);
+  lctx.save();
+  lctx.translate(S / 2, S / 2); lctx.scale(Z, Z); lctx.translate(-imgX, -imgY);
+  lctx.drawImage(work, 0, 0);
+  lctx.restore();
+  lctx.strokeStyle = 'rgba(255,90,90,.95)'; lctx.lineWidth = 2;
+  lctx.beginPath();
+  if (band && band.axis === 'v') { lctx.moveTo(S / 2, 0); lctx.lineTo(S / 2, S); }
+  else { lctx.moveTo(0, S / 2); lctx.lineTo(S, S / 2); }
+  lctx.stroke();
+
+  const r = stage.getBoundingClientRect();
+  const left = screenX > r.width / 2 ? 14 : r.width - S - 14;
+  const top  = screenY > r.height / 2 ? 14 : r.height - S - 14;
+  loupe.style.left = left + 'px';
+  loupe.style.top = top + 'px';
+  loupe.style.display = 'block';
+}
+const hideLoupe = () => loupe.style.display = 'none';
+
+/* ══════════════════════════════════════════════════════════════
+   pointer input — 1 finger draws, 2 fingers pan+zoom
+   ══════════════════════════════════════════════════════════════ */
+const pts = new Map();
+let drag = null;      // {mode:'new'|'a'|'b'|'move', ...}
+let gesture = null;   // pinch state
+
+function localPt(e) {
+  const r = stage.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+viewC.addEventListener('pointerdown', e => {
+  if (!work) return;
+  try { viewC.setPointerCapture(e.pointerId); } catch {}
+  pts.set(e.pointerId, localPt(e));
+
+  if (pts.size === 2) {
+    drag = null;
+    const [p, q] = [...pts.values()];
+    gesture = {
+      d0: Math.hypot(p.x - q.x, p.y - q.y),
+      c0: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 },
+      s0: view.scale, tx0: view.tx, ty0: view.ty
+    };
+    hideLoupe();
+    return;
+  }
+  if (pts.size > 2) return;
+
+  const p = localPt(e);
+  const ix = toImgX(p.x), iy = toImgY(p.y);
+  const along = band && band.axis === 'v' ? ix : iy;
+  const tol = 15 / view.scale;
+
+  if (band) {
+    const a = Math.min(band.a, band.b), b = Math.max(band.a, band.b);
+    if (Math.abs(along - a) <= tol)      drag = { mode: 'a' };
+    else if (Math.abs(along - b) <= tol) drag = { mode: 'b' };
+    else if (along > a && along < b)     drag = { mode: 'move', grab: along, a0: a, b0: b };
+    else drag = null;
+    if (drag) { band.a = a; band.b = b; render(); return; }
+  }
+  drag = { mode: 'new', ix, iy, decided: false };
+});
+
+viewC.addEventListener('pointermove', e => {
+  if (!pts.has(e.pointerId)) return;
+  const p = localPt(e);
+  pts.set(e.pointerId, p);
+
+  if (pts.size >= 2 && gesture) {
+    const [u, v] = [...pts.values()];
+    const d = Math.hypot(u.x - v.x, u.y - v.y);
+    const c = { x: (u.x + v.x) / 2, y: (u.y + v.y) / 2 };
+    const k = clamp((d / gesture.d0), .05, 20);
+    view.scale = gesture.s0 * k;
+    view.tx = c.x - (gesture.c0.x - gesture.tx0) * k;
+    view.ty = c.y - (gesture.c0.y - gesture.ty0) * k;
+    clampView(); render();
+    return;
+  }
+  if (!drag) return;
+
+  const ix = toImgX(p.x), iy = toImgY(p.y);
+
+  if (drag.mode === 'new') {
+    const dx = Math.abs(ix - drag.ix) * view.scale, dy = Math.abs(iy - drag.iy) * view.scale;
+    if (!drag.decided) {
+      if (Math.max(dx, dy) < 7) return;
+      const axis = dx >= dy ? 'v' : 'h';
+      band = { axis, a: axis === 'v' ? drag.ix : drag.iy, b: axis === 'v' ? ix : iy };
+      drag.decided = true;
+      warmCandidates(axis);
+    } else {
+      band.b = band.axis === 'v' ? ix : iy;
+    }
+  } else if (drag.mode === 'a') {
+    band.a = band.axis === 'v' ? ix : iy;
+  } else if (drag.mode === 'b') {
+    band.b = band.axis === 'v' ? ix : iy;
+  } else if (drag.mode === 'move') {
+    const cur = band.axis === 'v' ? ix : iy;
+    const d = cur - drag.grab;
+    band.a = drag.a0 + d; band.b = drag.b0 + d;
+  }
+
+  const lim = band.axis === 'v' ? work.width : work.height;
+  band.a = clamp(band.a, 0, lim); band.b = clamp(band.b, 0, lim);
+
+  if (drag.mode !== 'move') {
+    const live = drag.mode === 'a' ? band.a : band.b;
+    if (band.axis === 'v') showLoupe(live, toImgY(p.y), p.x, p.y);
+    else showLoupe(toImgX(p.x), live, p.x, p.y);
+  }
+  render(); syncReadout();
+});
+
+function endPointer(e) {
+  pts.delete(e.pointerId);
+  if (pts.size < 2) gesture = null;
+  if (pts.size === 0) {
+    hideLoupe();
+    if (drag && band) {
+      // snap both edges onto real structure, but never let them collapse together
+      const raw = { a: Math.min(band.a, band.b), b: Math.max(band.a, band.b) };
+      const a = Math.round(snapValue(band.axis, raw.a));
+      const b = Math.round(snapValue(band.axis, raw.b));
+      const ok = b - a >= 1;
+      band.a = ok ? a : Math.round(raw.a);
+      band.b = ok ? b : Math.round(raw.b);
+      if (band.b - band.a < 1) band = null;
+    }
+    drag = null;
+    render(); syncUI();
+  }
+}
+viewC.addEventListener('pointerup', endPointer);
+viewC.addEventListener('pointercancel', endPointer);
+
+async function warmCandidates(axis) {
+  if (candCache[axis] || !opts.snap) return;
+  busy(true, 'reading the layout…');
+  await nextFrame();
+  try { candidates(axis); } catch (err) { console.warn(err); candCache[axis] = []; }
+  busy(false);
+  render();
+}
+
+/* wheel / trackpad zoom for desktop */
+stage.addEventListener('wheel', e => {
+  if (!work) return;
+  e.preventDefault();
+  const p = localPt(e);
+  const k = Math.exp(-e.deltaY * (e.ctrlKey ? .01 : .0022));
+  const ix = toImgX(p.x), iy = toImgY(p.y);
+  view.scale *= k;
+  clampView();
+  view.tx = p.x - ix * view.scale;
+  view.ty = p.y - iy * view.scale;
+  clampView(); render();
+}, { passive: false });
+
+/* ══════════════════════════════════════════════════════════════
+   UI wiring
+   ══════════════════════════════════════════════════════════════ */
+function syncReadout() {
+  if (!band) { readout.innerHTML = '<span id="roLabel">drag across the image</span>'; return; }
+  const a = Math.round(Math.min(band.a, band.b)), b = Math.round(Math.max(band.a, band.b));
+  const unit = band.axis === 'v' ? 'wide' : 'tall';
+  readout.innerHTML = `<span>${a}</span><b>${b - a}px ${unit}</b><span>${b}</span>`;
+}
+function syncUI() {
+  syncReadout();
+  $('btnUndo').disabled = !ops.length;
+  $('btnRedo').disabled = !redo.length;
+  $('btnOrig').disabled = !ops.length;
+  $('btnSave').disabled = !work;
+  $('btnCut').disabled = !band;
+  $('axV').classList.toggle('on', !!band && band.axis === 'v');
+  $('axH').classList.toggle('on', !!band && band.axis === 'h');
+}
+
+function nudge(which, delta) {
+  if (!band) return;
+  const lim = band.axis === 'v' ? work.width : work.height;
+  const a = Math.min(band.a, band.b), b = Math.max(band.a, band.b);
+  let na = a, nb = b;
+  if (which === 'a') na = clamp(a + delta, 0, b - 1); else nb = clamp(b + delta, a + 1, lim);
+  band.a = na; band.b = nb;
+  render(); syncReadout();
+}
+const hold = (el, fn) => {
+  let t, i;
+  const start = e => { e.preventDefault(); fn(); t = setTimeout(() => i = setInterval(fn, 60), 380); };
+  const stop = () => { clearTimeout(t); clearInterval(i); };
+  el.addEventListener('pointerdown', start);
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(k => el.addEventListener(k, stop));
+};
+hold($('nA-'), () => nudge('a', -1));
+hold($('nA+'), () => nudge('a', 1));
+hold($('nB-'), () => nudge('b', -1));
+hold($('nB+'), () => nudge('b', 1));
+
+$('axisSeg').addEventListener('click', e => {
+  const btn = e.target.closest('button'); if (!btn || !work) return;
+  const axis = btn.dataset.axis;
+  if (!band) {                       // no band yet → drop a starter band in the middle
+    const lim = axis === 'v' ? work.width : work.height;
+    band = { axis, a: Math.round(lim * .45), b: Math.round(lim * .55) };
+  } else if (band.axis !== axis) {   // flip an existing band to the other direction
+    const lim = axis === 'v' ? work.width : work.height;
+    const w = Math.min(Math.abs(band.b - band.a), lim - 2);
+    const c = lim / 2;
+    band = { axis, a: Math.round(c - w / 2), b: Math.round(c + w / 2) };
+  }
+  warmCandidates(axis);
+  render(); syncUI();
+});
+
+$('btnCut').addEventListener('click', commitCut);
+$('btnClear').addEventListener('click', () => { band = null; render(); syncUI(); });
+$('btnUndo').addEventListener('click', undo);
+$('btnRedo').addEventListener('click', redoOp);
+$('btnReset').addEventListener('click', () => { reset(); closeSheet(); });
+
+const origBtn = $('btnOrig');
+['pointerdown'].forEach(k => origBtn.addEventListener(k, e => { e.preventDefault(); if (!ops.length) return; showOriginal = true; render(); }));
+['pointerup', 'pointerleave', 'pointercancel'].forEach(k => origBtn.addEventListener(k, () => { if (showOriginal) { showOriginal = false; render(); } }));
+
+/* file input */
+$('file').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; loadFile(f); });
+$('btnPick').addEventListener('click', () => $('file').click());
+
+/* paste + drop */
+window.addEventListener('paste', e => {
+  const it = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+  if (it) loadFile(it.getAsFile());
+});
+$('btnPaste').addEventListener('click', async () => {
+  try {
+    const items = await navigator.clipboard.read();
+    for (const it of items) {
+      const type = it.types.find(t => t.startsWith('image/'));
+      if (type) return loadFile(new File([await it.getType(type)], 'pasted.png', { type }));
+    }
+    hint('No image on the clipboard.');
+  } catch { hint('Copy an image first, then press Paste.'); }
+});
+['dragover', 'drop'].forEach(k => document.addEventListener(k, e => {
+  e.preventDefault();
+  if (k === 'drop' && e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+}));
+
+/* options sheet */
+const sheet = $('sheet'), scrim = $('scrim');
+const openSheet = () => { sheet.classList.add('open'); scrim.classList.add('open'); };
+const closeSheet = () => { sheet.classList.remove('open'); scrim.classList.remove('open'); };
+$('btnGear').addEventListener('click', openSheet);
+$('sheetClose').addEventListener('click', closeSheet);
+scrim.addEventListener('click', closeSheet);
+
+$('swSnap').addEventListener('click', e => {
+  opts.snap = !opts.snap;
+  e.currentTarget.classList.toggle('on', opts.snap);
+  if (opts.snap && band) warmCandidates(band.axis);
+  render();
+});
+$('selSeam').addEventListener('change', e => {
+  opts.seam = e.target.value;
+  $('fSeamColor').style.display = opts.seam === 'none' ? 'none' : 'flex';
+});
+$('seamColor').addEventListener('input', e => opts.color = e.target.value);
+$('seamWidth').addEventListener('input', e => opts.lineWidth = +e.target.value);
+$('selFmt').addEventListener('change', e => { opts.fmt = e.target.value; saveBlob = null; bakeBlob(); });
+$('fSeamColor').style.display = 'none';
+
+/* keyboard (desktop) */
+window.addEventListener('keydown', e => {
+  if (!work) return;
+  const meta = e.metaKey || e.ctrlKey;
+  if (meta && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redoOp() : undo(); return; }
+  if (!band) return;
+  const step = e.shiftKey ? 10 : 1;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp')    { e.preventDefault(); nudge(e.altKey ? 'a' : 'b', -step); }
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); nudge(e.altKey ? 'a' : 'b',  step); }
+  if (e.key === 'Enter') { e.preventDefault(); commitCut(); }
+  if (e.key === 'Escape') { band = null; render(); syncUI(); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   saving
+   ══════════════════════════════════════════════════════════════ */
+function outMime() {
+  if (opts.fmt === 'auto') return srcMime === 'image/webp' ? 'image/png' : srcMime;
+  return opts.fmt;
+}
+function bakeBlob() {
+  if (!work) return;
+  const mime = outMime();
+  const token = bakeBlob._t = {};
+  work.toBlob(b => { if (bakeBlob._t === token) saveBlob = b; }, mime, mime === 'image/jpeg' ? 0.95 : undefined);
+}
+
+async function doSave() {
+  if (!work) return;
+  const mime = outMime();
+  const ext = mime === 'image/jpeg' ? 'jpg' : 'png';
+  let blob = saveBlob;
+  if (!blob) blob = await new Promise(r => work.toBlob(r, mime, mime === 'image/jpeg' ? 0.95 : undefined));
+  const file = new File([blob], `${srcName}-cutout.${ext}`, { type: mime });
+
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); return; }
+    catch (err) { if (err && err.name === 'AbortError') return; }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  hint('Saved to your downloads.');
+}
+$('btnSave').addEventListener('click', doSave);
+
+/* ══════════════════════════════════════════════════════════════
+   boot
+   ══════════════════════════════════════════════════════════════ */
+/* small handle for poking at state from the console */
+window.CutOut = {
+  get image() { return work; },
+  get band() { return band; },
+  get ops() { return ops; },
+  get view() { return view; },
+  opts, candidates, fit: fitView, cut: commitCut, undo, reset,
+};
+
+window.addEventListener('resize', () => { resize(); clampView(); render(); });
+window.addEventListener('orientationchange', () => setTimeout(() => { resize(); fitView(); }, 250));
+resize(); syncUI();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+})();
+</script>
+</body>
+</html>

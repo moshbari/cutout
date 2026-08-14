@@ -1,0 +1,12 @@
+{
+  "name": "cutout",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Remove a column or row from the middle of an image and close the gap — Snagit's Cut Out tool as an iPhone app.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "icons": "node tools/make-icons.js"
+  },
+  "engines": { "node": ">=18" }
+}
