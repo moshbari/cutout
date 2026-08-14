@@ -186,7 +186,7 @@ extension EditorController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         #if DEBUG
         if let shot = DemoMode.shot {
-            if shot != 5 { deliver(DemoMode.sampleTable(), mime: "image/png", name: "Q3 Expenses") }
+            if shot != 6 { deliver(DemoMode.sampleTable(), mime: "image/png", name: "Q3 Expenses") }
             if let script = DemoMode.script(forShot: shot) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { self.js(script) }
             }

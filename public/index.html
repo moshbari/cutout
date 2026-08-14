@@ -136,10 +136,12 @@
   .swatches{display:flex;gap:4px;flex:1 1 auto;overflow-x:auto;padding:2px;scrollbar-width:none;justify-content:space-between}
   .swatches::-webkit-scrollbar{display:none}
   .sw-dot{
-    flex:0 0 auto;width:24px;height:24px;border-radius:50%;border:2px solid transparent;
-    padding:0;min-height:0;min-width:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.22);
+    flex:0 0 auto;width:24px;height:24px;border-radius:50%;border:0;
+    padding:0;min-height:0;min-width:0;
+    /* an outer ring, so the near-black swatch is still visible on a dark bar */
+    box-shadow:0 0 0 1.5px rgba(255,255,255,.38);
   }
-  .sw-dot.on{border-color:#fff;transform:scale(1.12)}
+  .sw-dot.on{box-shadow:0 0 0 3px #fff;transform:scale(1.12)}
   .ctx{display:flex;align-items:center;gap:7px;min-height:42px}
   .ctx .sep{width:1px;height:26px;background:var(--line);flex:0 0 auto}
   .ctx button.icon{min-width:38px;padding:8px 7px}
@@ -1658,6 +1660,7 @@ window.CutOut = {
   get tool() { return tool; },
   opts, mark, candidates, fit: fitView, cut: commitCut, undo, redo: redoOp, reset, flatten,
   setBand(axis, a, b) { band = { axis, a, b }; render(); syncUI(); return band; },
+  select(i) { sel = i; render(); syncUI(); return sel; },
 };
 
 window.addEventListener('resize', () => { resize(); clampView(); render(); });

@@ -17,12 +17,24 @@ enum DemoMode {
         return Int(args[i + 1])
     }
 
+    /// Marks placed against the sample table's own geometry — columns at
+    /// x = 60/400/700/940/1180/1340, header 90–178, then 88pt rows.
+    private static let marks = """
+      CutOut.marks.push({type:'ellipse', x:1168, y:436, w:184, h:98, color:'#ff3b30', width:8});
+      CutOut.marks.push({type:'arrow', x1:1010, y1:726, x2:1238, y2:552, color:'#ff3b30', width:8});
+      CutOut.marks.push({type:'text', x:534, y:700, text:'billed twice', color:'#ff3b30', size:44});
+      CutOut.marks.push({type:'text', x:64, y:816, text:'ask finance before paying', color:'#0a84ff', size:38});
+      CutOut.fit();
+    """
+
     static func script(forShot shot: Int) -> String? {
         switch shot {
-        case 1: return "CutOut.setBand('v', 700, 940);"
-        case 2: return "CutOut.setBand('v', 700, 940); CutOut.cut();"
-        case 3: return "CutOut.setBand('h', 266, 354);"
-        case 4: return "CutOut.setBand('v', 700, 940); CutOut.cut(); document.getElementById('btnGear').click();"
+        case 1: return marks                                         // the finished mark-up
+        case 2: return "CutOut.setBand('v', 700, 940);"              // band over a column
+        case 3: return "CutOut.setBand('v', 700, 940); CutOut.cut();"// the gap closed
+        case 4: return marks + "CutOut.select(2);"                   // a note selected, handles + colours
+        case 5: return "CutOut.setBand('h', 266, 354);"              // a row instead
+        case 7: return "CutOut.setBand('v', 700, 940); CutOut.cut(); document.getElementById('btnGear').click();"
         default: return nil
         }
     }
