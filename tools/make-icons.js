@@ -19,15 +19,25 @@ function chunk(type, data) {
   const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td));
   return Buffer.concat([len, td, crc]);
 }
-function png(width, height, rgba) {
+// alpha=false writes a truecolour PNG with no alpha channel — the App Store
+// rejects app icons that carry one, even when it is fully opaque.
+function png(width, height, rgba, alpha = true) {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
-  const stride = width * 4;
+  ihdr[8] = 8; ihdr[9] = alpha ? 6 : 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  const bpp = alpha ? 4 : 3;
+  const stride = width * bpp;
   const raw = Buffer.alloc((stride + 1) * height);
   for (let y = 0; y < height; y++) {
     raw[y * (stride + 1)] = 0;
-    rgba.copy(raw, y * (stride + 1) + 1, y * stride, y * stride + stride);
+    if (alpha) {
+      rgba.copy(raw, y * (stride + 1) + 1, y * stride * 1, y * stride + stride);
+    } else {
+      for (let x = 0; x < width; x++) {
+        const s = (y * width + x) * 4, d = y * (stride + 1) + 1 + x * 3;
+        raw[d] = rgba[s]; raw[d + 1] = rgba[s + 1]; raw[d + 2] = rgba[s + 2];
+      }
+    }
   }
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -79,5 +89,12 @@ function draw(S) {
 const out = path.join(__dirname, '..', 'public');
 for (const size of [180, 192, 512]) {
   fs.writeFileSync(path.join(out, `icon-${size}.png`), png(size, size, draw(size)));
-  console.log('wrote icon-' + size + '.png');
+  console.log('wrote public/icon-' + size + '.png');
+}
+
+// App Store icon: 1024, no alpha channel
+const appIcon = path.join(__dirname, '..', 'ios', 'CutOut', 'Assets.xcassets', 'AppIcon.appiconset');
+if (fs.existsSync(appIcon)) {
+  fs.writeFileSync(path.join(appIcon, 'icon-1024.png'), png(1024, 1024, draw(1024), false));
+  console.log('wrote ios AppIcon icon-1024.png (no alpha)');
 }

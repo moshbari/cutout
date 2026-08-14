@@ -36,9 +36,11 @@
     background:linear-gradient(180deg,#12151b,#0e1014); border-bottom:1px solid var(--line);
     flex:0 0 auto; position:relative; z-index:5;
   }
-  .brand{font-weight:700;letter-spacing:.3px;font-size:16px;margin-right:auto;display:flex;align-items:center;gap:7px}
-  .brand svg{display:block}
-  .brand small{font-weight:500;color:var(--dim);font-size:11px;display:block}
+  .brand{font-weight:700;letter-spacing:.3px;font-size:16px;margin-right:auto;display:flex;align-items:center;gap:7px;min-width:0}
+  .brand svg{display:block;flex:0 0 auto}
+  .brand small{font-weight:500;color:var(--dim);font-size:11px;display:block;white-space:nowrap}
+  /* on a phone the tagline is just decoration — never let it wrap the header taller */
+  @media (max-width:560px){ .brand small{display:none} }
 
   button{
     font:inherit; color:var(--text); background:var(--panel2); border:1px solid var(--line);
@@ -48,6 +50,8 @@
   button:active{transform:scale(.96)}
   button[disabled]{opacity:.32}
   button.icon{padding:9px 11px; min-width:44px}
+  /* icons are inline SVG, not emoji — glyph coverage varies too much across devices */
+  button svg{width:20px;height:20px;display:block;flex:0 0 auto}
   button.primary{background:var(--accent); border-color:var(--accent); color:#04203f; font-weight:700}
   button.good{background:var(--accent2); border-color:var(--accent2); color:#062d13; font-weight:700}
   button.ghost{background:transparent}
@@ -100,7 +104,8 @@
   .nudge{display:flex;gap:4px}
   .nudge button{min-width:38px; padding:8px 6px; font-size:16px; line-height:1}
   .seg{display:flex; background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden}
-  .seg button{border:0;border-radius:0;background:transparent;padding:8px 11px;font-size:13px;min-height:38px}
+  .seg button{border:0;border-radius:0;background:transparent;padding:8px 10px;font-size:13px;min-height:38px;gap:5px}
+  .seg button svg{width:17px;height:17px}
   .seg button.on{background:var(--accent); color:#04203f; font-weight:700}
   .chip{
     display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);
@@ -154,9 +159,18 @@
     </svg>
     <div>CutOut<small>remove a column or row</small></div>
   </div>
-  <button class="icon ghost" id="btnUndo" title="Undo" disabled>↺</button>
-  <button class="icon ghost" id="btnRedo" title="Redo" disabled>↻</button>
-  <button class="icon ghost" id="btnOrig" title="Hold to see original" disabled>👁</button>
+  <button class="icon ghost" id="btnOpen" title="Open another image" aria-label="Open another image">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="8.5" cy="10" r="1.7"/><path d="M4.5 17.5 9 13a2 2 0 0 1 2.8 0l6.4 6.4"/>
+    </svg>
+  </button>
+  <button class="icon ghost" id="btnUndo" title="Undo" aria-label="Undo" disabled>↺</button>
+  <button class="icon ghost" id="btnRedo" title="Redo" aria-label="Redo" disabled>↻</button>
+  <button class="icon ghost" id="btnOrig" title="Hold to see the original" aria-label="Hold to see the original" disabled>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.2 12S6 5.6 12 5.6 21.8 12 21.8 12 18 18.4 12 18.4 2.2 12 2.2 12Z"/><circle cx="12" cy="12" r="2.7"/>
+    </svg>
+  </button>
   <button class="good" id="btnSave" disabled>Save</button>
 </header>
 
@@ -203,18 +217,39 @@
   </div>
   <div class="row">
     <div class="seg" id="axisSeg">
-      <button data-axis="v" id="axV">▉ Column</button>
-      <button data-axis="h" id="axH">▤ Row</button>
+      <button data-axis="v" id="axV">
+        <svg viewBox="0 0 24 24" fill="none"><rect x="2" y="4" width="6" height="16" rx="1.2" fill="currentColor"/><rect x="16" y="4" width="6" height="16" rx="1.2" fill="currentColor"/><path d="M12 3v18" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2.6"/></svg>
+        Column
+      </button>
+      <button data-axis="h" id="axH">
+        <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="2" width="16" height="6" rx="1.2" fill="currentColor"/><rect x="4" y="16" width="16" height="6" rx="1.2" fill="currentColor"/><path d="M3 12h18" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2.6"/></svg>
+        Row
+      </button>
     </div>
-    <button class="ghost" id="btnClear">Clear</button>
-    <button class="primary grow" id="btnCut" disabled>✂ Cut out</button>
-    <button class="icon ghost" id="btnGear">⚙</button>
+    <button class="icon ghost" id="btnClear" title="Clear the band" aria-label="Clear the band">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+    <button class="primary grow" id="btnCut" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="6" cy="6.5" r="2.6"/><circle cx="6" cy="17.5" r="2.6"/><path d="M8.2 7.9 19.5 17.8M19.5 6.2 8.2 16.1"/>
+      </svg>
+      Cut out
+    </button>
+    <button class="icon ghost" id="btnGear" aria-label="Options">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+        <path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/>
+      </svg>
+    </button>
   </div>
 </footer>
 
 <div id="scrim"></div>
 <div id="sheet">
-  <div class="sheet-h"><h2>Options</h2><button class="ghost icon" id="sheetClose">✕</button></div>
+  <div class="sheet-h"><h2>Options</h2>
+    <button class="ghost icon" id="sheetClose" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </div>
 
   <div class="field">
     <label>Snap to table lines
@@ -272,6 +307,12 @@
 <script>
 (() => {
 'use strict';
+
+/* ══════════════════════════════════════════════════════════════
+   native shell (the iOS app injects __CUTOUT_NATIVE__ before we run)
+   ══════════════════════════════════════════════════════════════ */
+const NATIVE = !!window.__CUTOUT_NATIVE__;
+const bridge = (cmd, extra) => window.webkit?.messageHandlers?.cutout?.postMessage({ cmd, ...extra });
 
 /* ══════════════════════════════════════════════════════════════
    state
@@ -351,10 +392,11 @@ async function loadFile(file) {
 
     ops = []; redo = []; band = null;
     rebuild();
-    fitView();
+    // reveal the toolbar first — fitView has to measure the stage at its final height
     emptyEl.classList.add('hidden');
     tools.classList.remove('hidden');
     resize();
+    fitView();
     hint('Drag one finger across the part you want gone.', 4200);
   } catch (e) {
     hint('Could not open that image.');
@@ -446,17 +488,18 @@ function commitCut() {
   if (b - a >= max) { hint('That would remove the whole image.'); return; }
 
   ops.push({ axis: band.axis, a, b, style: opts.seam, color: opts.color, lineWidth: opts.lineWidth });
+  if (NATIVE) bridge('haptic');
   redo = [];
   band = null;
   rebuild();
-  clampView();
+  reframe();
   render();
   syncUI();
   hint(`Removed ${b - a} px. Cut again, or Save.`, 2000);
 }
 
-function undo() { if (!ops.length) return; redo.push(ops.pop()); band = null; rebuild(); clampView(); render(); syncUI(); }
-function redoOp() { if (!redo.length) return; ops.push(redo.pop()); band = null; rebuild(); clampView(); render(); syncUI(); }
+function undo() { if (!ops.length) return; redo.push(ops.pop()); band = null; rebuild(); reframe(); render(); syncUI(); }
+function redoOp() { if (!redo.length) return; ops.push(redo.pop()); band = null; rebuild(); reframe(); render(); syncUI(); }
 function reset() { if (!original) return; ops = []; redo = []; band = null; rebuild(); fitView(); syncUI(); }
 
 /* ══════════════════════════════════════════════════════════════
@@ -587,6 +630,12 @@ function fitView() {
   view.ty = (h - work.height * view.scale) / 2;
   render();
 }
+/// After a cut the image is smaller, so a whole-image view would sit off-centre.
+/// Re-fit it — unless you are zoomed in, where holding your position matters more.
+function reframe() {
+  if (view.scale <= fitScale() * 1.02) fitView(); else clampView();
+}
+
 function clampView() {
   if (!work) return;
   const { w, h } = stageSize();
@@ -923,9 +972,21 @@ const origBtn = $('btnOrig');
 ['pointerdown'].forEach(k => origBtn.addEventListener(k, e => { e.preventDefault(); if (!ops.length) return; showOriginal = true; render(); }));
 ['pointerup', 'pointerleave', 'pointercancel'].forEach(k => origBtn.addEventListener(k, () => { if (showOriginal) { showOriginal = false; render(); } }));
 
-/* file input */
+/* file input — in the iOS app this goes through the native photo picker instead,
+   which hands back the original bytes at full resolution */
 $('file').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; loadFile(f); });
-$('btnPick').addEventListener('click', () => $('file').click());
+const openImage = () => NATIVE ? bridge('pick') : $('file').click();
+$('btnPick').addEventListener('click', openImage);
+$('btnOpen').addEventListener('click', openImage);
+
+window.__cutoutNative = {
+  openImage(base64, mime, name) {
+    const bin = atob(base64), bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    loadFile(new File([bytes], name || 'image.png', { type: mime || 'image/png' }));
+  },
+  saved(ok, message) { hint(message, ok ? 1800 : 4000); },
+};
 
 /* paste + drop */
 window.addEventListener('paste', e => {
@@ -1003,6 +1064,15 @@ async function doSave() {
   const ext = mime === 'image/jpeg' ? 'jpg' : 'png';
   let blob = saveBlob;
   if (!blob) blob = await new Promise(r => work.toBlob(r, mime, mime === 'image/jpeg' ? 0.95 : undefined));
+
+  if (NATIVE) {                                   // straight into the photo library
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    bridge('save', { data: btoa(bin) });
+    return;
+  }
+
   const file = new File([blob], `${srcName}-cutout.${ext}`, { type: mime });
 
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -1027,6 +1097,7 @@ window.CutOut = {
   get ops() { return ops; },
   get view() { return view; },
   opts, candidates, fit: fitView, cut: commitCut, undo, reset,
+  setBand(axis, a, b) { band = { axis, a, b }; render(); syncUI(); return band; },
 };
 
 window.addEventListener('resize', () => { resize(); clampView(); render(); });
