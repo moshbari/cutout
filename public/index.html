@@ -120,6 +120,55 @@
   .grow{flex:1 1 auto}
   .hidden{display:none !important}
 
+  /* ---------- tool strip ---------- */
+  .tools{display:flex;gap:6px;flex:1 1 auto;min-width:0}
+  .tool{
+    flex:1 1 0; min-width:0; padding:7px 4px; gap:3px; min-height:50px;
+    flex-direction:column; font-size:10.5px; color:var(--dim);
+    background:var(--panel); border-color:transparent;
+  }
+  .tool svg{width:19px;height:19px}
+  .tool.on{background:#16202c;border-color:#3d5a80;color:var(--text)}
+  .tool.on svg{color:var(--accent)}
+
+  /* ---------- colour + size row for the selected mark ---------- */
+  /* all eight colours have to be reachable without a scroll on a 390px phone */
+  .swatches{display:flex;gap:4px;flex:1 1 auto;overflow-x:auto;padding:2px;scrollbar-width:none;justify-content:space-between}
+  .swatches::-webkit-scrollbar{display:none}
+  .sw-dot{
+    flex:0 0 auto;width:24px;height:24px;border-radius:50%;border:2px solid transparent;
+    padding:0;min-height:0;min-width:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.22);
+  }
+  .sw-dot.on{border-color:#fff;transform:scale(1.12)}
+  .ctx{display:flex;align-items:center;gap:7px;min-height:42px}
+  .ctx .sep{width:1px;height:26px;background:var(--line);flex:0 0 auto}
+  .ctx button.icon{min-width:38px;padding:8px 7px}
+
+  /* ---------- floating cut action ---------- */
+  #cutFab{
+    position:absolute;left:50%;bottom:16px;transform:translateX(-50%);
+    background:var(--accent);color:#04203f;font-weight:700;border:0;border-radius:999px;
+    padding:12px 22px;min-height:48px;box-shadow:0 8px 24px rgba(0,0,0,.5);z-index:4;
+    display:none;align-items:center;gap:8px;font-size:15px;
+  }
+  #cutFab.show{display:inline-flex}
+  #cutFab svg{width:19px;height:19px}
+
+  /* ---------- text editor ---------- */
+  #textBar{
+    position:fixed;left:10px;right:10px;top:calc(var(--sat) + 62px);z-index:30;
+    background:var(--panel);border:1px solid #3d5a80;border-radius:16px;padding:12px;
+    box-shadow:0 16px 40px rgba(0,0,0,.6);display:none;flex-direction:column;gap:9px;
+  }
+  #textBar.show{display:flex}
+  #textBar,#textInput{touch-action:auto}
+  #textInput{
+    font:inherit;font-size:16px;color:var(--text);background:var(--panel2);
+    border:1px solid var(--line);border-radius:11px;padding:11px;resize:none;width:100%;
+    -webkit-user-select:text;user-select:text;
+  }
+  #textInput:focus{outline:none;border-color:var(--accent)}
+
   /* ---------- sheet ---------- */
   #sheet{
     position:fixed; left:0; right:0; bottom:0; z-index:20; background:var(--panel);
@@ -179,6 +228,12 @@
   <div id="loupe"><canvas id="loupeC" width="132" height="132"></canvas></div>
   <div id="hint" class="hidden"></div>
   <div id="busy">analysing edges…</div>
+  <button id="cutFab">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="6" cy="6.5" r="2.6"/><circle cx="6" cy="17.5" r="2.6"/><path d="M8.2 7.9 19.5 17.8M19.5 6.2 8.2 16.1"/>
+    </svg>
+    Cut out
+  </button>
 
   <div id="empty">
     <svg width="86" height="66" viewBox="0 0 86 66" fill="none" aria-hidden="true">
@@ -191,8 +246,8 @@
       <rect x="34" y="1" width="18" height="64" rx="3" fill="#2a1c1c" stroke="#ff6b6b" stroke-dasharray="4 3"/>
       <path d="M43 22 l0 22 M36 33 l14 0" stroke="#ff6b6b" stroke-width="2" stroke-linecap="round"/>
     </svg>
-    <h1>Cut the middle out</h1>
-    <p>Drag a band across a photo or screenshot. CutOut deletes that strip and slides the two halves together — no visible edit.</p>
+    <h1>Cut it out. Mark it up.</h1>
+    <p>Drag a band across a screenshot and that strip disappears — the two halves slide together with no visible edit. Then circle things, point at them, and add notes that are actually readable.</p>
     <div class="row demo">
       <button class="primary" id="btnPick">Choose image</button>
       <button id="btnPaste" class="desk">Paste</button>
@@ -202,7 +257,9 @@
 </div>
 
 <footer id="tools" class="hidden">
-  <div class="row">
+
+  <!-- context row: band controls when cutting, colour + size when a mark is selected -->
+  <div class="row ctx" id="ctxCut">
     <div class="nudge">
       <button id="nA-" title="move left edge out">‹</button>
       <button id="nA+" title="move left edge in">›</button>
@@ -215,33 +272,60 @@
       <button id="nB+" title="move right edge out">›</button>
     </div>
   </div>
+
+  <div class="row ctx hidden" id="ctxMark">
+    <div class="swatches" id="swatches"></div>
+    <div class="sep"></div>
+    <button class="icon ghost" id="szDown" title="Smaller" aria-label="Smaller">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>
+    </button>
+    <button class="icon ghost" id="szUp" title="Bigger" aria-label="Bigger">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+    <button class="icon ghost" id="markDel" title="Delete" aria-label="Delete">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 7h16M9 7V5h6v2M6.5 7l1 13h9l1-13M10.5 10.5v6M13.5 10.5v6"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- tool strip -->
   <div class="row">
-    <div class="seg" id="axisSeg">
-      <button data-axis="v" id="axV">
-        <svg viewBox="0 0 24 24" fill="none"><rect x="2" y="4" width="6" height="16" rx="1.2" fill="currentColor"/><rect x="16" y="4" width="6" height="16" rx="1.2" fill="currentColor"/><path d="M12 3v18" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2.6"/></svg>
-        Column
+    <div class="tools" id="toolStrip">
+      <button class="tool on" data-tool="cut" id="toolCut">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="6" cy="6.5" r="2.6"/><circle cx="6" cy="17.5" r="2.6"/><path d="M8.2 7.9 19.5 17.8M19.5 6.2 8.2 16.1"/>
+        </svg>Cut
       </button>
-      <button data-axis="h" id="axH">
-        <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="2" width="16" height="6" rx="1.2" fill="currentColor"/><rect x="4" y="16" width="16" height="6" rx="1.2" fill="currentColor"/><path d="M3 12h18" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2.6"/></svg>
-        Row
+      <button class="tool" data-tool="rect">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/></svg>Box
+      </button>
+      <button class="tool" data-tool="ellipse">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="8.5" ry="7"/></svg>Circle
+      </button>
+      <button class="tool" data-tool="arrow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19 18.5 5.5M10 5h9v9"/></svg>Arrow
+      </button>
+      <button class="tool" data-tool="text">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 6.5h14M12 6.5V18M9 18h6"/></svg>Text
       </button>
     </div>
-    <button class="icon ghost" id="btnClear" title="Clear the band" aria-label="Clear the band">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-    </button>
-    <button class="primary grow" id="btnCut" disabled>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="6" cy="6.5" r="2.6"/><circle cx="6" cy="17.5" r="2.6"/><path d="M8.2 7.9 19.5 17.8M19.5 6.2 8.2 16.1"/>
-      </svg>
-      Cut out
-    </button>
-    <button class="icon ghost" id="btnGear" aria-label="Options">
+    <button class="icon ghost" id="btnGear" aria-label="Options" style="min-height:50px">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
         <path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/>
       </svg>
     </button>
   </div>
 </footer>
+
+<!-- typed straight into a bar pinned near the top, so the keyboard never covers it -->
+<div id="textBar">
+  <textarea id="textInput" rows="2" placeholder="Type your note…" autocapitalize="sentences"></textarea>
+  <div class="row">
+    <button class="ghost" id="textCancel">Cancel</button>
+    <button class="primary grow" id="textDone">Done</button>
+  </div>
+</div>
 
 <div id="scrim"></div>
 <div id="sheet">
@@ -292,10 +376,17 @@
 
   <div class="field" style="display:block">
     <div class="muted">
-      <b style="color:var(--text)">How to use</b><br>
+      <b style="color:var(--text)">Cutting</b><br>
       1 finger drag = draw the band · 2 fingers = pan &amp; zoom · drag a band edge to fine-tune ·
-      arrows nudge 1 px · <b>Cut out</b> removes it. Repeat as many times as you like, then <b>Save</b>
-      to send it to Photos.<br><br>
+      arrows nudge 1 px · <b>Cut out</b> removes it. Repeat as often as you like.
+      <br><br>
+      <b style="color:var(--text)">Marking up</b><br>
+      Pick Box, Circle or Arrow and <b>drag</b> to draw it. Pick Text and <b>tap</b> where the note goes.
+      <b>Tap any mark to select it</b>, then drag it to move, drag its corner to resize, or use the
+      colour dots. On a text note the corner changes the font size and the box re-fits itself —
+      padding, corners and all. Nothing is baked in until you <b>Save</b>, so you can move and
+      recolour marks for as long as you like.
+      <br><br>
       <span class="desk" style="display:none">Desktop: <span class="kbd">←</span><span class="kbd">→</span> nudge,
       <span class="kbd">Enter</span> cut, <span class="kbd">⌘Z</span> undo, <span class="kbd">⌘V</span> paste.</span>
     </div>
@@ -320,10 +411,18 @@ const bridge = (cmd, extra) => window.webkit?.messageHandlers?.cutout?.postMessa
 let original = null;      // pristine canvas, natural resolution
 let work     = null;      // canvas after all applied cuts
 let ops      = [];        // [{axis,a,b,style,color,lineWidth}] applied in order
-let redo     = [];
+let annos    = [];        // live marks, in work-image pixels, drawn over the top
+let sel      = -1;        // index of the selected mark, -1 for none
+let tool     = 'cut';     // cut | rect | ellipse | arrow | text
 let band     = null;      // {axis:'v'|'h', a, b} in CURRENT work-image pixels
 let srcMime  = 'image/png';
 let srcName  = 'cutout';
+
+/* Marks stay live objects — you can re-tap, move, recolour and resize them until
+   you save. They are only ever baked into pixels at export time. */
+const PALETTE = ['#ff3b30', '#ff9500', '#ffd60a', '#34c759', '#0a84ff', '#bf5af2', '#ffffff', '#12151a'];
+const mark = { color: '#ff3b30' };
+const clone = o => JSON.parse(JSON.stringify(o));
 
 const view = { scale: 1, tx: 0, ty: 0 };
 const opts = { snap: true, seam: 'none', color: '#ffffff', lineWidth: 3, fmt: 'auto' };
@@ -390,7 +489,8 @@ async function loadFile(file) {
     srcMime = (file.type === 'image/jpeg' || file.type === 'image/webp') ? file.type : 'image/png';
     srcName = (file.name || 'image').replace(/\.[^.]+$/, '') || 'image';
 
-    ops = []; redo = []; band = null;
+    ops = []; annos = []; sel = -1; band = null;
+    past.length = 0; future.length = 0;
     rebuild();
     // reveal the toolbar first — fitView has to measure the stage at its final height
     emptyEl.classList.add('hidden');
@@ -479,6 +579,23 @@ function rebuild() {
   bakeBlob();
 }
 
+/// A cut moves every pixel to its left/above nothing, and everything past the band
+/// closer by the width of the band. Marks live in those coordinates, so they have to
+/// travel with it — anything inside the band collapses onto the seam.
+function shiftAnnosThroughCut(axis, a, b) {
+  const gap = b - a;
+  const move = v => v <= a ? v : v >= b ? v - gap : a;
+  for (const an of annos) {
+    if (axis === 'v') {
+      if (an.type === 'arrow') { an.x1 = move(an.x1); an.x2 = move(an.x2); }
+      else { const r = move(an.x + (an.w || 0)); an.x = move(an.x); if (an.w != null) an.w = Math.max(1, r - an.x); }
+    } else {
+      if (an.type === 'arrow') { an.y1 = move(an.y1); an.y2 = move(an.y2); }
+      else { const bm = move(an.y + (an.h || 0)); an.y = move(an.y); if (an.h != null) an.h = Math.max(1, bm - an.y); }
+    }
+  }
+}
+
 function commitCut() {
   if (!band) return;
   const a = Math.round(Math.min(band.a, band.b));
@@ -487,9 +604,10 @@ function commitCut() {
   if (b - a < 1) { hint('That band is too thin to remove.'); return; }
   if (b - a >= max) { hint('That would remove the whole image.'); return; }
 
+  pushHistory();
   ops.push({ axis: band.axis, a, b, style: opts.seam, color: opts.color, lineWidth: opts.lineWidth });
+  shiftAnnosThroughCut(band.axis, a, b);
   if (NATIVE) bridge('haptic');
-  redo = [];
   band = null;
   rebuild();
   reframe();
@@ -498,9 +616,30 @@ function commitCut() {
   hint(`Removed ${b - a} px. Cut again, or Save.`, 2000);
 }
 
-function undo() { if (!ops.length) return; redo.push(ops.pop()); band = null; rebuild(); reframe(); render(); syncUI(); }
-function redoOp() { if (!redo.length) return; ops.push(redo.pop()); band = null; rebuild(); reframe(); render(); syncUI(); }
-function reset() { if (!original) return; ops = []; redo = []; band = null; rebuild(); fitView(); syncUI(); }
+/* ══════════════════════════════════════════════════════════════
+   history — one stack covering both cuts and marks
+   ══════════════════════════════════════════════════════════════ */
+const past = [], future = [];
+const snapshot = () => ({ ops: clone(ops), annos: clone(annos) });
+
+function pushHistory() {
+  past.push(snapshot());
+  if (past.length > 60) past.shift();
+  future.length = 0;
+}
+function applyState(s) {
+  ops = s.ops; annos = s.annos;
+  sel = -1; band = null;
+  rebuild(); reframe(); render(); syncUI();
+}
+function undo() { if (!past.length) return; future.push(snapshot()); applyState(past.pop()); }
+function redoOp() { if (!future.length) return; past.push(snapshot()); applyState(future.pop()); }
+function reset() {
+  if (!original) return;
+  pushHistory();
+  applyState({ ops: [], annos: [] });
+  fitView();
+}
 
 /* ══════════════════════════════════════════════════════════════
    snap candidates — find real table lines / whitespace gutters
@@ -603,6 +742,138 @@ function snapValue(axis, v) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   marks — box, circle, arrow, text
+   ══════════════════════════════════════════════════════════════ */
+const measure = makeCanvas(1, 1).getContext('2d');
+
+function luminance(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  return 0.2126 * f(n >> 16 & 255) + 0.7152 * f(n >> 8 & 255) + 0.0722 * f(n & 255);
+}
+
+/// Black or white on top of `hex` — whichever genuinely wins the contrast ratio,
+/// not whichever a fixed lightness threshold guesses. On mid-tone colours like red
+/// and blue the two are close enough that guessing picks the worse one.
+function readableOn(hex) {
+  const L = luminance(hex);
+  return (L + 0.05) / 0.05 >= 1.05 / (L + 0.05) ? '#101216' : '#ffffff';
+}
+
+const fontFor = size => `600 ${size}px -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif`;
+
+/// The whole point: the box is derived from the text, every time it is drawn.
+/// Change the size and the padding, radius and line height all scale with it —
+/// there is no box to resize by hand and nothing to get out of step.
+function textLayout(a) {
+  const size = a.size;
+  measure.font = fontFor(size);
+  const lines = String(a.text || ' ').split('\n');
+  let widest = 0;
+  for (const line of lines) widest = Math.max(widest, measure.measureText(line || ' ').width);
+  const padX = Math.round(size * 0.52), padY = Math.round(size * 0.34);
+  const lh = Math.round(size * 1.32);
+  return {
+    lines, lh, padX, padY,
+    w: Math.ceil(widest) + padX * 2,
+    h: lines.length * lh + padY * 2,
+    r: Math.round(size * 0.36),
+  };
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/// A coloured stroke alone disappears on a same-coloured background, so every shape
+/// gets a contrasting halo underneath it. Red reads on white and on dark.
+function haloStroke(ctx, path, color, width) {
+  ctx.save();
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.strokeStyle = readableOn(color) === '#ffffff' ? 'rgba(255,255,255,.5)' : 'rgba(0,0,0,.45)';
+  ctx.lineWidth = width + Math.max(2, width * 0.5);   // a hairline of contrast, not a second stroke
+  path(); ctx.stroke();
+  ctx.strokeStyle = color; ctx.lineWidth = width;
+  path(); ctx.stroke();
+  ctx.restore();
+}
+
+function annoBounds(a) {
+  if (a.type === 'arrow') {
+    return { x: Math.min(a.x1, a.x2), y: Math.min(a.y1, a.y2),
+             w: Math.abs(a.x2 - a.x1), h: Math.abs(a.y2 - a.y1) };
+  }
+  if (a.type === 'text') { const L = textLayout(a); return { x: a.x, y: a.y, w: L.w, h: L.h }; }
+  return { x: Math.min(a.x, a.x + a.w), y: Math.min(a.y, a.y + a.h), w: Math.abs(a.w), h: Math.abs(a.h) };
+}
+
+function drawAnno(ctx, a) {
+  const w = a.width || 4;
+  if (a.type === 'rect') {
+    const b = annoBounds(a);
+    haloStroke(ctx, () => roundRect(ctx, b.x, b.y, b.w, b.h, Math.min(w * 1.6, Math.min(b.w, b.h) / 2)), a.color, w);
+  } else if (a.type === 'ellipse') {
+    const b = annoBounds(a);
+    haloStroke(ctx, () => {
+      ctx.beginPath();
+      ctx.ellipse(b.x + b.w / 2, b.y + b.h / 2, Math.max(1, b.w / 2), Math.max(1, b.h / 2), 0, 0, Math.PI * 2);
+    }, a.color, w);
+  } else if (a.type === 'arrow') {
+    const ang = Math.atan2(a.y2 - a.y1, a.x2 - a.x1);
+    const head = Math.max(w * 3.4, 10);
+    const bx = a.x2 - Math.cos(ang) * head * 0.82, by = a.y2 - Math.sin(ang) * head * 0.82;
+    haloStroke(ctx, () => { ctx.beginPath(); ctx.moveTo(a.x1, a.y1); ctx.lineTo(bx, by); }, a.color, w);
+    const tip = ang => [a.x2 - Math.cos(ang) * head, a.y2 - Math.sin(ang) * head];
+    const [lx, ly] = tip(ang - 0.42), [rx, ry] = tip(ang + 0.42);
+    const path = () => { ctx.beginPath(); ctx.moveTo(a.x2, a.y2); ctx.lineTo(lx, ly); ctx.lineTo(rx, ry); ctx.closePath(); };
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = readableOn(a.color) === '#ffffff' ? 'rgba(255,255,255,.5)' : 'rgba(0,0,0,.45)';
+    ctx.lineWidth = Math.max(2, w * 0.5);
+    path(); ctx.stroke();
+    ctx.fillStyle = a.color; path(); ctx.fill();
+    ctx.restore();
+  } else if (a.type === 'text') {
+    const L = textLayout(a), fg = readableOn(a.color);
+    ctx.save();
+    ctx.font = fontFor(a.size);
+    ctx.textBaseline = 'middle';
+    // a soft shadow lifts the chip off busy backgrounds
+    ctx.shadowColor = 'rgba(0,0,0,.45)';
+    ctx.shadowBlur = Math.max(3, a.size * 0.30);
+    ctx.shadowOffsetY = Math.max(1, a.size * 0.07);
+    ctx.fillStyle = a.color;
+    roundRect(ctx, a.x, a.y, L.w, L.h, L.r); ctx.fill();
+    ctx.shadowColor = 'transparent';
+    // hairline in the text colour, for when the chip lands on its own hue
+    ctx.strokeStyle = fg; ctx.globalAlpha = 0.25;
+    ctx.lineWidth = Math.max(1, a.size * 0.045);
+    roundRect(ctx, a.x, a.y, L.w, L.h, L.r); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = fg;
+    L.lines.forEach((line, i) => ctx.fillText(line, a.x + L.padX, a.y + L.padY + i * L.lh + L.lh / 2));
+    ctx.restore();
+  }
+}
+
+const drawAnnos = ctx => { for (const a of annos) drawAnno(ctx, a); };
+
+/// Marks scale with the image, not the screen, so a note on a 4000px screenshot
+/// looks the same as one on a 800px screenshot.
+function baseSize() {
+  const d = Math.max(work.width, work.height);
+  return Math.max(12, Math.round(d / 26));
+}
+const strokeSize = () => Math.max(2, Math.round(baseSize() / 6));
+
+/* ══════════════════════════════════════════════════════════════
    view / render
    ══════════════════════════════════════════════════════════════ */
 function resize() {
@@ -658,6 +929,7 @@ function render() {
   vctx.translate(view.tx, view.ty);
   vctx.scale(view.scale, view.scale);
   vctx.drawImage(img, 0, 0);
+  if (!showOriginal) drawAnnos(vctx);      // marks live in image coordinates
   vctx.restore();
 
   // subtle frame
@@ -666,6 +938,38 @@ function render() {
 
   if (showOriginal) { badge('ORIGINAL'); return; }
   if (band) drawBand(w, h);
+  if (sel >= 0 && annos[sel]) drawSelection(annos[sel]);
+}
+
+/// Handles are drawn in screen space so they stay finger-sized however far you zoom.
+const HANDLE = 13;
+
+function handlePoints(a) {
+  if (a.type === 'arrow') {
+    return [{ id: 'p1', x: toScreenX(a.x1), y: toScreenY(a.y1) },
+            { id: 'p2', x: toScreenX(a.x2), y: toScreenY(a.y2) }];
+  }
+  const b = annoBounds(a);
+  if (a.type === 'text') return [{ id: 'size', x: toScreenX(b.x + b.w), y: toScreenY(b.y + b.h) }];
+  return [{ id: 'tl', x: toScreenX(b.x), y: toScreenY(b.y) },
+          { id: 'br', x: toScreenX(b.x + b.w), y: toScreenY(b.y + b.h) }];
+}
+
+function drawSelection(a) {
+  const b = annoBounds(a);
+  const x = toScreenX(b.x), y = toScreenY(b.y);
+  const w = b.w * view.scale, h = b.h * view.scale;
+  vctx.save();
+  vctx.strokeStyle = 'rgba(255,255,255,.9)'; vctx.lineWidth = 1.5;
+  vctx.setLineDash([5, 4]);
+  vctx.strokeRect(x - 4, y - 4, w + 8, h + 8);
+  vctx.setLineDash([]);
+  for (const p of handlePoints(a)) {
+    vctx.beginPath(); vctx.arc(p.x, p.y, HANDLE / 2 + 1, 0, 7);
+    vctx.fillStyle = '#fff'; vctx.fill();
+    vctx.lineWidth = 2.5; vctx.strokeStyle = '#0a84ff'; vctx.stroke();
+  }
+  vctx.restore();
 }
 
 function badge(text) {
@@ -794,10 +1098,30 @@ viewC.addEventListener('pointerdown', e => {
 
   const p = localPt(e);
   const ix = toImgX(p.x), iy = toImgY(p.y);
-  const along = band && band.axis === 'v' ? ix : iy;
-  const tol = 15 / view.scale;
 
-  if (band) {
+  // 1. a handle on the selected mark always wins
+  if (sel >= 0 && annos[sel]) {
+    for (const hp of handlePoints(annos[sel])) {
+      if (Math.hypot(p.x - hp.x, p.y - hp.y) <= HANDLE + 8) {
+        pushHistory();
+        drag = { mode: 'handle', id: hp.id, start: clone(annos[sel]), ix, iy };
+        return;
+      }
+    }
+    // 2. then its body — drag to move it
+    const b = annoBounds(annos[sel]);
+    const pad = 8 / view.scale;
+    if (ix >= b.x - pad && ix <= b.x + b.w + pad && iy >= b.y - pad && iy <= b.y + b.h + pad) {
+      pushHistory();
+      drag = { mode: 'moveAnno', start: clone(annos[sel]), ix, iy };
+      return;
+    }
+  }
+
+  // 3. band edges, when the cut tool is up
+  if (tool === 'cut' && band) {
+    const along = band.axis === 'v' ? ix : iy;
+    const tol = 15 / view.scale;
     const a = Math.min(band.a, band.b), b = Math.max(band.a, band.b);
     if (Math.abs(along - a) <= tol)      drag = { mode: 'a' };
     else if (Math.abs(along - b) <= tol) drag = { mode: 'b' };
@@ -805,8 +1129,55 @@ viewC.addEventListener('pointerdown', e => {
     else drag = null;
     if (drag) { band.a = a; band.b = b; render(); return; }
   }
-  drag = { mode: 'new', ix, iy, decided: false };
+
+  // 4. otherwise this is either a new mark (drag) or a selection (tap) — decided on release
+  drag = { mode: 'new', ix, iy, decided: false, hit: hitAnno(ix, iy), sx: p.x, sy: p.y };
 });
+
+/// Topmost mark under the point, or -1. Generous slop so thin arrows are still tappable.
+/// Arrows test against the line itself — a diagonal arrow's bounding box is mostly
+/// empty space, and grabbing that empty space feels broken.
+function hitAnno(ix, iy) {
+  const pad = 12 / view.scale;
+  for (let i = annos.length - 1; i >= 0; i--) {
+    const a = annos[i];
+    if (a.type === 'arrow') {
+      const dx = a.x2 - a.x1, dy = a.y2 - a.y1;
+      const len2 = dx * dx + dy * dy || 1;
+      const t = clamp(((ix - a.x1) * dx + (iy - a.y1) * dy) / len2, 0, 1);
+      if (Math.hypot(ix - (a.x1 + t * dx), iy - (a.y1 + t * dy)) <= pad + (a.width || 4)) return i;
+      continue;
+    }
+    const b = annoBounds(a);
+    if (ix >= b.x - pad && ix <= b.x + b.w + pad && iy >= b.y - pad && iy <= b.y + b.h + pad) return i;
+  }
+  return -1;
+}
+
+function newMark(x, y) {
+  const size = baseSize(), w = strokeSize();
+  if (tool === 'arrow') return { type: 'arrow', x1: x, y1: y, x2: x, y2: y, color: mark.color, width: w };
+  if (tool === 'text')  return { type: 'text', x, y, text: '', color: mark.color, size };
+  return { type: tool, x, y, w: 1, h: 1, color: mark.color, width: w };
+}
+
+function resizeMark(a, start, id, dx, dy) {
+  if (a.type === 'arrow') {
+    if (id === 'p1') { a.x1 = start.x1 + dx; a.y1 = start.y1 + dy; }
+    else             { a.x2 = start.x2 + dx; a.y2 = start.y2 + dy; }
+    return;
+  }
+  if (a.type === 'text') {
+    // dragging the corner changes the font size; the chip re-lays out around it
+    const L0 = textLayout(start);
+    const k = Math.max(0.25, (L0.w + dx) / Math.max(1, L0.w));
+    a.size = clamp(Math.round(start.size * k), 9, Math.round(Math.max(work.width, work.height) / 4));
+    return;
+  }
+  const r = start.x + start.w, bm = start.y + start.h;
+  if (id === 'tl') { a.x = start.x + dx; a.y = start.y + dy; a.w = r - a.x; a.h = bm - a.y; }
+  else             { a.w = start.w + dx; a.h = start.h + dy; }
+}
 
 viewC.addEventListener('pointermove', e => {
   if (!pts.has(e.pointerId)) return;
@@ -828,8 +1199,37 @@ viewC.addEventListener('pointermove', e => {
 
   const ix = toImgX(p.x), iy = toImgY(p.y);
 
+  if (drag.mode === 'handle') {
+    resizeMark(annos[sel], drag.start, drag.id, ix - drag.ix, iy - drag.iy);
+    render(); return;
+  }
+  if (drag.mode === 'moveAnno') {
+    const a = annos[sel], s = drag.start, dx = ix - drag.ix, dy = iy - drag.iy;
+    if (a.type === 'arrow') { a.x1 = s.x1 + dx; a.y1 = s.y1 + dy; a.x2 = s.x2 + dx; a.y2 = s.y2 + dy; }
+    else { a.x = s.x + dx; a.y = s.y + dy; }
+    render(); return;
+  }
+
   if (drag.mode === 'new') {
     const dx = Math.abs(ix - drag.ix) * view.scale, dy = Math.abs(iy - drag.iy) * view.scale;
+
+    if (tool !== 'cut') {
+      // text is placed by tapping, not dragging — nothing to preview
+      if (tool === 'text') return;
+      if (!drag.decided) {
+        if (Math.max(dx, dy) < 7) return;
+        pushHistory();
+        annos.push(newMark(drag.ix, drag.iy));
+        sel = annos.length - 1;
+        drag.decided = true;
+        syncUI();
+      }
+      const a = annos[sel];
+      if (a.type === 'arrow') { a.x2 = ix; a.y2 = iy; }
+      else { a.w = ix - a.x; a.h = iy - a.y; }
+      render(); return;
+    }
+
     if (!drag.decided) {
       if (Math.max(dx, dy) < 7) return;
       const axis = dx >= dy ? 'v' : 'h';
@@ -865,6 +1265,43 @@ function endPointer(e) {
   if (pts.size < 2) gesture = null;
   if (pts.size === 0) {
     hideLoupe();
+
+    if (drag && (drag.mode === 'handle' || drag.mode === 'moveAnno')) {
+      // a tap that moved nothing should not cost an undo step
+      if (JSON.stringify(annos[sel]) === JSON.stringify(drag.start)) past.pop();
+      drag = null; render(); syncUI(); return;
+    }
+
+    if (drag && drag.mode === 'new' && tool !== 'cut') {
+      if (drag.decided) {
+        const a = annos[sel], b = annoBounds(a);
+        // a flick that produced nothing is not a mark
+        if ((a.type === 'arrow' ? Math.hypot(a.x2 - a.x1, a.y2 - a.y1) : Math.min(b.w, b.h)) < 4) {
+          annos.splice(sel, 1); sel = -1; past.pop();
+        } else if (a.type !== 'arrow') {           // normalise negative drags
+          a.x = b.x; a.y = b.y; a.w = b.w; a.h = b.h;
+        }
+      } else if (tool === 'text') {
+        pushHistory();
+        const a = newMark(drag.ix, drag.iy);
+        // drop it centred on the finger rather than hanging off it
+        const L = textLayout({ ...a, text: 'Note' });
+        a.x -= L.w / 2; a.y -= L.h / 2;
+        annos.push(a); sel = annos.length - 1;
+        editText(sel, true);
+      } else {
+        sel = drag.hit;                            // a tap selects whatever is under it
+      }
+      drag = null; render(); syncUI(); return;
+    }
+
+    if (drag && drag.mode === 'new' && tool === 'cut' && !drag.decided && drag.hit >= 0) {
+      sel = drag.hit; drag = null; render(); syncUI(); return;
+    }
+    if (drag && drag.mode === 'new' && !drag.decided && drag.hit < 0 && sel >= 0) {
+      sel = -1; drag = null; render(); syncUI(); return;
+    }
+
     if (drag && band) {
       // snap both edges onto real structure, but never let them collapse together
       const raw = { a: Math.min(band.a, band.b), b: Math.max(band.a, band.b) };
@@ -916,14 +1353,117 @@ function syncReadout() {
 }
 function syncUI() {
   syncReadout();
-  $('btnUndo').disabled = !ops.length;
-  $('btnRedo').disabled = !redo.length;
-  $('btnOrig').disabled = !ops.length;
+  const dirty = ops.length || annos.length;
+  $('btnUndo').disabled = !past.length;
+  $('btnRedo').disabled = !future.length;
+  $('btnOrig').disabled = !dirty;
   $('btnSave').disabled = !work;
-  $('btnCut').disabled = !band;
-  $('axV').classList.toggle('on', !!band && band.axis === 'v');
-  $('axH').classList.toggle('on', !!band && band.axis === 'h');
+  $('cutFab').classList.toggle('show', tool === 'cut' && !!band);
+
+  const marked = sel >= 0 && !!annos[sel];
+  $('ctxMark').classList.toggle('hidden', !marked);
+  $('ctxCut').classList.toggle('hidden', marked);
+  if (marked) {
+    const c = annos[sel].color;
+    for (const dot of $('swatches').children) dot.classList.toggle('on', dot.dataset.c === c);
+  } else {
+    for (const dot of $('swatches').children) dot.classList.toggle('on', dot.dataset.c === mark.color);
+  }
+  for (const b of $('toolStrip').children) b.classList.toggle('on', b.dataset.tool === tool);
+  scheduleBake();
 }
+
+/// Flattening a big screenshot is not free, so only re-bake once things settle.
+let bakeTimer = 0;
+function scheduleBake() {
+  saveBlob = null;
+  clearTimeout(bakeTimer);
+  bakeTimer = setTimeout(bakeBlob, 450);
+}
+
+/* ---- tools ---- */
+$('toolStrip').addEventListener('click', e => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  tool = btn.dataset.tool;
+  if (tool !== 'cut') band = null;
+  sel = -1;
+  render(); syncUI();
+  hint(tool === 'cut' ? 'Drag across the part you want gone.'
+     : tool === 'text' ? 'Tap where the note should go.'
+     : 'Drag to draw. Tap a mark to select it.', 2400);
+});
+
+/* ---- colour ---- */
+for (const c of PALETTE) {
+  const dot = document.createElement('button');
+  dot.className = 'sw-dot';
+  dot.dataset.c = c;
+  dot.style.background = c;
+  dot.setAttribute('aria-label', 'Colour ' + c);
+  dot.addEventListener('click', () => {
+    mark.color = c;
+    if (sel >= 0 && annos[sel]) { pushHistory(); annos[sel].color = c; }
+    render(); syncUI();
+  });
+  $('swatches').appendChild(dot);
+}
+
+/* ---- size ---- */
+function resizeSelected(factor) {
+  if (sel < 0 || !annos[sel]) return;
+  pushHistory();
+  const a = annos[sel];
+  if (a.type === 'text') a.size = clamp(Math.round(a.size * factor), 9, Math.round(Math.max(work.width, work.height) / 4));
+  else a.width = clamp(Math.round((a.width || 4) * factor * 10) / 10, 1, 200);
+  render(); syncUI();
+}
+$('szUp').addEventListener('click', () => resizeSelected(1.25));
+$('szDown').addEventListener('click', () => resizeSelected(1 / 1.25));
+$('markDel').addEventListener('click', () => {
+  if (sel < 0) return;
+  pushHistory(); annos.splice(sel, 1); sel = -1; render(); syncUI();
+});
+
+/* ---- text editing ---- */
+let editing = -1, editingIsNew = false;
+const textBar = $('textBar'), textInput = $('textInput');
+
+function editText(i, isNew) {
+  editing = i; editingIsNew = !!isNew;
+  textInput.value = annos[i].text || '';
+  textBar.classList.add('show');
+  setTimeout(() => { textInput.focus(); textInput.select(); }, 30);
+}
+function closeText(save) {
+  if (editing < 0) return;
+  const a = annos[editing];
+  if (save) {
+    const v = textInput.value.trim();
+    if (!v) { annos.splice(editing, 1); sel = -1; }
+    else a.text = v;
+  } else if (editingIsNew) {
+    annos.splice(editing, 1); sel = -1; past.pop();
+  }
+  editing = -1;
+  textBar.classList.remove('show');
+  textInput.blur();
+  render(); syncUI();
+}
+$('textDone').addEventListener('click', () => closeText(true));
+$('textCancel').addEventListener('click', () => closeText(false));
+textInput.addEventListener('input', () => {
+  if (editing < 0) return;
+  annos[editing].text = textInput.value || ' ';   // live preview while typing
+  render();
+});
+
+/* double-tap a text mark to edit it again */
+let lastTap = 0;
+viewC.addEventListener('pointerup', e => {
+  const now = Date.now();
+  if (now - lastTap < 320 && sel >= 0 && annos[sel] && annos[sel].type === 'text') editText(sel, false);
+  lastTap = now;
+});
 
 function nudge(which, delta) {
   if (!band) return;
@@ -946,24 +1486,7 @@ hold($('nA+'), () => nudge('a', 1));
 hold($('nB-'), () => nudge('b', -1));
 hold($('nB+'), () => nudge('b', 1));
 
-$('axisSeg').addEventListener('click', e => {
-  const btn = e.target.closest('button'); if (!btn || !work) return;
-  const axis = btn.dataset.axis;
-  if (!band) {                       // no band yet → drop a starter band in the middle
-    const lim = axis === 'v' ? work.width : work.height;
-    band = { axis, a: Math.round(lim * .45), b: Math.round(lim * .55) };
-  } else if (band.axis !== axis) {   // flip an existing band to the other direction
-    const lim = axis === 'v' ? work.width : work.height;
-    const w = Math.min(Math.abs(band.b - band.a), lim - 2);
-    const c = lim / 2;
-    band = { axis, a: Math.round(c - w / 2), b: Math.round(c + w / 2) };
-  }
-  warmCandidates(axis);
-  render(); syncUI();
-});
-
-$('btnCut').addEventListener('click', commitCut);
-$('btnClear').addEventListener('click', () => { band = null; render(); syncUI(); });
+$('cutFab').addEventListener('click', commitCut);
 $('btnUndo').addEventListener('click', undo);
 $('btnRedo').addEventListener('click', redoOp);
 $('btnReset').addEventListener('click', () => { reset(); closeSheet(); });
@@ -1047,6 +1570,16 @@ window.addEventListener('keydown', e => {
 /* ══════════════════════════════════════════════════════════════
    saving
    ══════════════════════════════════════════════════════════════ */
+/// Marks are only turned into pixels here, at full image resolution.
+function flatten() {
+  if (!annos.length) return work;
+  const out = makeCanvas(work.width, work.height);
+  const ctx = out.getContext('2d');
+  ctx.drawImage(work, 0, 0);
+  drawAnnos(ctx);
+  return out;
+}
+
 function outMime() {
   if (opts.fmt === 'auto') return srcMime === 'image/webp' ? 'image/png' : srcMime;
   return opts.fmt;
@@ -1055,7 +1588,7 @@ function bakeBlob() {
   if (!work) return;
   const mime = outMime();
   const token = bakeBlob._t = {};
-  work.toBlob(b => { if (bakeBlob._t === token) saveBlob = b; }, mime, mime === 'image/jpeg' ? 0.95 : undefined);
+  flatten().toBlob(b => { if (bakeBlob._t === token) saveBlob = b; }, mime, mime === 'image/jpeg' ? 0.95 : undefined);
 }
 
 async function doSave() {
@@ -1063,7 +1596,7 @@ async function doSave() {
   const mime = outMime();
   const ext = mime === 'image/jpeg' ? 'jpg' : 'png';
   let blob = saveBlob;
-  if (!blob) blob = await new Promise(r => work.toBlob(r, mime, mime === 'image/jpeg' ? 0.95 : undefined));
+  if (!blob) blob = await new Promise(r => flatten().toBlob(r, mime, mime === 'image/jpeg' ? 0.95 : undefined));
 
   if (NATIVE) {                                   // straight into the photo library
     const buf = new Uint8Array(await blob.arrayBuffer());
@@ -1096,7 +1629,10 @@ window.CutOut = {
   get band() { return band; },
   get ops() { return ops; },
   get view() { return view; },
-  opts, candidates, fit: fitView, cut: commitCut, undo, reset,
+  get marks() { return annos; },
+  get sel() { return sel; },
+  get tool() { return tool; },
+  opts, mark, candidates, fit: fitView, cut: commitCut, undo, redo: redoOp, reset, flatten,
   setBand(axis, a, b) { band = { axis, a, b }; render(); syncUI(); return band; },
 };
 
