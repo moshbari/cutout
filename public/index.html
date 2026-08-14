@@ -276,6 +276,11 @@
   <div class="row ctx hidden" id="ctxMark">
     <div class="swatches" id="swatches"></div>
     <div class="sep"></div>
+    <button class="icon ghost hidden" id="markEdit" title="Edit the words" aria-label="Edit the words">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="M14.5 6.5l3 3"/>
+      </svg>
+    </button>
     <button class="icon ghost" id="szDown" title="Smaller" aria-label="Smaller">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>
     </button>
@@ -841,6 +846,7 @@ function drawAnno(ctx, a) {
     ctx.fillStyle = a.color; path(); ctx.fill();
     ctx.restore();
   } else if (a.type === 'text') {
+    if (!String(a.text || '').trim()) return;     // never paint an empty chip
     const L = textLayout(a), fg = readableOn(a.color);
     ctx.save();
     ctx.font = fontFor(a.size);
@@ -1080,6 +1086,9 @@ function localPt(e) {
 
 viewC.addEventListener('pointerdown', e => {
   if (!work) return;
+  // while the note editor is open, touching the image commits what you typed
+  // rather than dropping another note on top of it
+  if (editing >= 0) { closeText(true); return; }
   try { viewC.setPointerCapture(e.pointerId); } catch {}
   pts.set(e.pointerId, localPt(e));
 
@@ -1109,9 +1118,7 @@ viewC.addEventListener('pointerdown', e => {
       }
     }
     // 2. then its body — drag to move it
-    const b = annoBounds(annos[sel]);
-    const pad = 8 / view.scale;
-    if (ix >= b.x - pad && ix <= b.x + b.w + pad && iy >= b.y - pad && iy <= b.y + b.h + pad) {
+    if (insideAnno(annos[sel], ix, iy, 10 / view.scale)) {
       pushHistory();
       drag = { mode: 'moveAnno', start: clone(annos[sel]), ix, iy };
       return;
@@ -1134,23 +1141,24 @@ viewC.addEventListener('pointerdown', e => {
   drag = { mode: 'new', ix, iy, decided: false, hit: hitAnno(ix, iy), sx: p.x, sy: p.y };
 });
 
-/// Topmost mark under the point, or -1. Generous slop so thin arrows are still tappable.
 /// Arrows test against the line itself — a diagonal arrow's bounding box is mostly
-/// empty space, and grabbing that empty space feels broken.
+/// empty space, and both grabbing that empty space and being unable to draw in it
+/// feel broken.
+function insideAnno(a, ix, iy, pad) {
+  if (a.type === 'arrow') {
+    const dx = a.x2 - a.x1, dy = a.y2 - a.y1;
+    const len2 = dx * dx + dy * dy || 1;
+    const t = clamp(((ix - a.x1) * dx + (iy - a.y1) * dy) / len2, 0, 1);
+    return Math.hypot(ix - (a.x1 + t * dx), iy - (a.y1 + t * dy)) <= pad + (a.width || 4);
+  }
+  const b = annoBounds(a);
+  return ix >= b.x - pad && ix <= b.x + b.w + pad && iy >= b.y - pad && iy <= b.y + b.h + pad;
+}
+
+/// Topmost mark under the point, or -1. Generous slop so thin marks are still tappable.
 function hitAnno(ix, iy) {
   const pad = 12 / view.scale;
-  for (let i = annos.length - 1; i >= 0; i--) {
-    const a = annos[i];
-    if (a.type === 'arrow') {
-      const dx = a.x2 - a.x1, dy = a.y2 - a.y1;
-      const len2 = dx * dx + dy * dy || 1;
-      const t = clamp(((ix - a.x1) * dx + (iy - a.y1) * dy) / len2, 0, 1);
-      if (Math.hypot(ix - (a.x1 + t * dx), iy - (a.y1 + t * dy)) <= pad + (a.width || 4)) return i;
-      continue;
-    }
-    const b = annoBounds(a);
-    if (ix >= b.x - pad && ix <= b.x + b.w + pad && iy >= b.y - pad && iy <= b.y + b.h + pad) return i;
-  }
+  for (let i = annos.length - 1; i >= 0; i--) if (insideAnno(annos[i], ix, iy, pad)) return i;
   return -1;
 }
 
@@ -1267,20 +1275,33 @@ function endPointer(e) {
     hideLoupe();
 
     if (drag && (drag.mode === 'handle' || drag.mode === 'moveAnno')) {
-      // a tap that moved nothing should not cost an undo step
-      if (JSON.stringify(annos[sel]) === JSON.stringify(drag.start)) past.pop();
+      const still = JSON.stringify(annos[sel]) === JSON.stringify(drag.start);
+      const wasBody = drag.mode === 'moveAnno';
+      if (still) past.pop();            // a tap that moved nothing costs no undo step
+      drag = null;
+      // …and a tap on an already-selected note is how you get back into its words
+      if (still && wasBody && annos[sel] && annos[sel].type === 'text') editText(sel, false);
+      render(); syncUI(); return;
+    }
+
+    if (drag && drag.mode === 'new' && drag.decided && tool !== 'cut') {
+      const a = annos[sel], b = annoBounds(a);
+      // a flick that produced nothing is not a mark
+      if ((a.type === 'arrow' ? Math.hypot(a.x2 - a.x1, a.y2 - a.y1) : Math.min(b.w, b.h)) < 4) {
+        annos.splice(sel, 1); sel = -1; past.pop();
+      } else if (a.type !== 'arrow') {             // normalise negative drags
+        a.x = b.x; a.y = b.y; a.w = b.w; a.h = b.h;
+      }
       drag = null; render(); syncUI(); return;
     }
 
-    if (drag && drag.mode === 'new' && tool !== 'cut') {
-      if (drag.decided) {
-        const a = annos[sel], b = annoBounds(a);
-        // a flick that produced nothing is not a mark
-        if ((a.type === 'arrow' ? Math.hypot(a.x2 - a.x1, a.y2 - a.y1) : Math.min(b.w, b.h)) < 4) {
-          annos.splice(sel, 1); sel = -1; past.pop();
-        } else if (a.type !== 'arrow') {           // normalise negative drags
-          a.x = b.x; a.y = b.y; a.w = b.w; a.h = b.h;
-        }
+    // a tap — the same rules whatever tool is up, so nothing is ever unreachable
+    if (drag && drag.mode === 'new' && !drag.decided) {
+      const hit = drag.hit;
+      if (hit >= 0) {
+        // tap once to select, tap the selected note again to edit its words
+        if (hit === sel && annos[hit].type === 'text') editText(hit, false);
+        else sel = hit;
       } else if (tool === 'text') {
         pushHistory();
         const a = newMark(drag.ix, drag.iy);
@@ -1290,16 +1311,9 @@ function endPointer(e) {
         annos.push(a); sel = annos.length - 1;
         editText(sel, true);
       } else {
-        sel = drag.hit;                            // a tap selects whatever is under it
+        sel = -1;
       }
       drag = null; render(); syncUI(); return;
-    }
-
-    if (drag && drag.mode === 'new' && tool === 'cut' && !drag.decided && drag.hit >= 0) {
-      sel = drag.hit; drag = null; render(); syncUI(); return;
-    }
-    if (drag && drag.mode === 'new' && !drag.decided && drag.hit < 0 && sel >= 0) {
-      sel = -1; drag = null; render(); syncUI(); return;
     }
 
     if (drag && band) {
@@ -1363,6 +1377,7 @@ function syncUI() {
   const marked = sel >= 0 && !!annos[sel];
   $('ctxMark').classList.toggle('hidden', !marked);
   $('ctxCut').classList.toggle('hidden', marked);
+  $('markEdit').classList.toggle('hidden', !marked || annos[sel].type !== 'text');
   if (marked) {
     const c = annos[sel].color;
     for (const dot of $('swatches').children) dot.classList.toggle('on', dot.dataset.c === c);
@@ -1425,44 +1440,53 @@ $('markDel').addEventListener('click', () => {
 });
 
 /* ---- text editing ---- */
-let editing = -1, editingIsNew = false;
+let editing = -1, editingIsNew = false, editSnap = null;
 const textBar = $('textBar'), textInput = $('textInput');
 
 function editText(i, isNew) {
+  if (!annos[i] || annos[i].type !== 'text') return;
   editing = i; editingIsNew = !!isNew;
+  // a new note already pushed history when it was created; an existing one needs
+  // its own restore point, because typing edits the mark live
+  editSnap = isNew ? null : snapshot();
   textInput.value = annos[i].text || '';
   textBar.classList.add('show');
   setTimeout(() => { textInput.focus(); textInput.select(); }, 30);
 }
+
 function closeText(save) {
   if (editing < 0) return;
-  const a = annos[editing];
+  const i = editing, was = editSnap && editSnap.annos[i] ? editSnap.annos[i].text : null;
+  editing = -1;                                   // before anything can re-enter
+
   if (save) {
     const v = textInput.value.trim();
-    if (!v) { annos.splice(editing, 1); sel = -1; }
-    else a.text = v;
+    if (!v) {                                     // an empty note is not a note
+      if (editingIsNew) past.pop(); else if (editSnap) { past.push(editSnap); future.length = 0; }
+      annos.splice(i, 1); sel = -1;
+    } else {
+      if (editSnap && was !== v) { past.push(editSnap); future.length = 0; }
+      annos[i].text = v;
+    }
   } else if (editingIsNew) {
-    annos.splice(editing, 1); sel = -1; past.pop();
+    annos.splice(i, 1); sel = -1; past.pop();
+  } else if (editSnap) {
+    annos = editSnap.annos;                       // throw away the live preview
   }
-  editing = -1;
+
+  editSnap = null;
   textBar.classList.remove('show');
   textInput.blur();
   render(); syncUI();
 }
+
 $('textDone').addEventListener('click', () => closeText(true));
 $('textCancel').addEventListener('click', () => closeText(false));
+$('markEdit').addEventListener('click', () => { if (sel >= 0) editText(sel, false); });
 textInput.addEventListener('input', () => {
   if (editing < 0) return;
   annos[editing].text = textInput.value || ' ';   // live preview while typing
   render();
-});
-
-/* double-tap a text mark to edit it again */
-let lastTap = 0;
-viewC.addEventListener('pointerup', e => {
-  const now = Date.now();
-  if (now - lastTap < 320 && sel >= 0 && annos[sel] && annos[sel].type === 'text') editText(sel, false);
-  lastTap = now;
 });
 
 function nudge(which, delta) {
