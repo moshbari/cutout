@@ -345,7 +345,7 @@
   <div class="field">
     <label>Snap to table lines
       <span class="muted">Sticks the band to real column / row borders so the join is exact.</span></label>
-    <div class="sw on" id="swSnap"></div>
+    <div class="sw" id="swSnap"></div>
   </div>
 
   <div class="field">
@@ -432,7 +432,41 @@ const mark = { color: '#ff3b30' };
 const clone = o => JSON.parse(JSON.stringify(o));
 
 const view = { scale: 1, tx: 0, ty: 0 };
-const opts = { snap: true, seam: 'none', color: '#ffffff', lineWidth: 3, fmt: 'auto' };
+// Snap starts OFF for everyone: a plain drag should do exactly what the finger did.
+// Anyone who wants it turned on turns it on once, and it is remembered from then on.
+const opts = { snap: false, seam: 'none', color: '#ffffff', lineWidth: 3, fmt: 'auto' };
+
+/* ── remembered settings ──────────────────────────────────────────
+   The options sheet is set-and-forget: whoever turns the seam on, or always saves
+   as PNG, wants that same choice the next time the app opens. So every change is
+   written straight to localStorage and read back at boot — including the last
+   mark colour, which is the choice people actually make most often.
+   Each value is validated on the way in: a hand-edited or stale store must never
+   be able to put the app into a state its own UI cannot show. */
+const PREFS_KEY = 'cutout.prefs.v1';
+const SEAMS = ['none', 'line', 'dashed', 'jagged', 'wave'];
+const FORMATS = ['auto', 'image/png', 'image/jpeg'];
+
+function loadPrefs() {
+  let p;
+  try { p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'); } catch { return; }
+  if (!p || typeof p !== 'object') return;
+  if (typeof p.snap === 'boolean') opts.snap = p.snap;
+  if (SEAMS.includes(p.seam)) opts.seam = p.seam;
+  if (/^#[0-9a-f]{6}$/i.test(p.color)) opts.color = p.color;
+  if (Number.isFinite(p.lineWidth) && p.lineWidth >= 1 && p.lineWidth <= 14) opts.lineWidth = Math.round(p.lineWidth);
+  if (FORMATS.includes(p.fmt)) opts.fmt = p.fmt;
+  if (PALETTE.includes(p.markColor)) mark.color = p.markColor;
+}
+
+function savePrefs() {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({
+      snap: opts.snap, seam: opts.seam, color: opts.color,
+      lineWidth: opts.lineWidth, fmt: opts.fmt, markColor: mark.color,
+    }));
+  } catch {}   // private browsing / a full store must never break the editor
+}
 
 let showOriginal = false;
 let candCache = {};       // {v:[...], h:[...]} snap candidates for current work canvas
@@ -1428,6 +1462,7 @@ for (const c of PALETTE) {
   dot.setAttribute('aria-label', 'Colour ' + c);
   dot.addEventListener('click', () => {
     mark.color = c;
+    savePrefs();
     if (sel >= 0 && annos[sel]) { pushHistory(); annos[sel].color = c; }
     render(); syncUI();
   });
@@ -1578,16 +1613,28 @@ $('swSnap').addEventListener('click', e => {
   opts.snap = !opts.snap;
   e.currentTarget.classList.toggle('on', opts.snap);
   if (opts.snap && band) warmCandidates(band.axis);
+  savePrefs();
   render();
 });
 $('selSeam').addEventListener('change', e => {
   opts.seam = e.target.value;
   $('fSeamColor').style.display = opts.seam === 'none' ? 'none' : 'flex';
+  savePrefs();
 });
-$('seamColor').addEventListener('input', e => opts.color = e.target.value);
-$('seamWidth').addEventListener('input', e => opts.lineWidth = +e.target.value);
-$('selFmt').addEventListener('change', e => { opts.fmt = e.target.value; saveBlob = null; bakeBlob(); });
-$('fSeamColor').style.display = 'none';
+$('seamColor').addEventListener('input', e => { opts.color = e.target.value; savePrefs(); });
+$('seamWidth').addEventListener('input', e => { opts.lineWidth = +e.target.value; savePrefs(); });
+$('selFmt').addEventListener('change', e => { opts.fmt = e.target.value; savePrefs(); saveBlob = null; bakeBlob(); });
+
+/// Put the sheet's controls where the remembered settings say they are — the
+/// markup only ever shows the factory defaults.
+function syncSheet() {
+  $('swSnap').classList.toggle('on', opts.snap);
+  $('selSeam').value = opts.seam;
+  $('seamColor').value = opts.color;
+  $('seamWidth').value = opts.lineWidth;
+  $('selFmt').value = opts.fmt;
+  $('fSeamColor').style.display = opts.seam === 'none' ? 'none' : 'flex';
+}
 
 /* keyboard (desktop) */
 window.addEventListener('keydown', e => {
@@ -1674,6 +1721,7 @@ window.CutOut = {
 
 window.addEventListener('resize', () => { resize(); clampView(); render(); });
 window.addEventListener('orientationchange', () => setTimeout(() => { resize(); fitView(); }, 250));
+loadPrefs(); syncSheet();
 resize(); syncUI();
 
 if ('serviceWorker' in navigator) {
