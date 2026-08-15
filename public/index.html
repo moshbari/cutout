@@ -767,6 +767,15 @@ function readableOn(hex) {
   return (L + 0.05) / 0.05 >= 1.05 / (L + 0.05) ? '#101216' : '#ffffff';
 }
 
+/// The word on a coloured chip. Pure contrast maths calls red, blue and purple
+/// "light" — they clear the ratio against black by a hair — but a dark word on a
+/// saturated chip reads muddy, and every app people already know puts white there.
+/// So the chip goes by how dark the colour looks: red, blue, purple and near-black
+/// take white; orange, yellow, green and white take black.
+function textOn(hex) {
+  return luminance(hex) < 0.35 ? '#ffffff' : '#101216';
+}
+
 const fontFor = size => `600 ${size}px -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif`;
 
 /// The whole point: the box is derived from the text, every time it is drawn.
@@ -849,7 +858,7 @@ function drawAnno(ctx, a) {
     ctx.restore();
   } else if (a.type === 'text') {
     if (!String(a.text || '').trim()) return;     // never paint an empty chip
-    const L = textLayout(a), fg = readableOn(a.color);
+    const L = textLayout(a), fg = textOn(a.color);
     ctx.save();
     ctx.font = fontFor(a.size);
     ctx.textBaseline = 'middle';

@@ -1,5 +1,5 @@
 // CutOut service worker — the whole app is 4 files, so cache them and run offline.
-const CACHE = 'cutout-v4';
+const CACHE = 'cutout-v5';
 const ASSETS = ['./', './index.html', './privacy.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
