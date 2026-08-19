@@ -42,6 +42,18 @@
   /* on a phone the tagline is just decoration — never let it wrap the header taller */
   @media (max-width:560px){ .brand small{display:none} }
 
+  /* ---------- hosted mode ----------
+     Another app has embedded the editor and handed us one image to work on.
+     There is nothing to brand and nothing to open — the only two answers are
+     Cancel and the finished picture — so the bar becomes exactly those. */
+  #btnCancel{display:none}
+  body.hosted .brand{display:none}
+  body.hosted #btnOpen{display:none}
+  body.hosted #btnCancel{display:inline-flex;margin-right:auto}
+  /* the host always sends its picture straight away, so the choose-a-picture
+     buttons would only ever be a way to lose it */
+  body.hosted #empty .demo{display:none}
+
   button{
     font:inherit; color:var(--text); background:var(--panel2); border:1px solid var(--line);
     border-radius:11px; padding:9px 12px; min-height:40px; cursor:pointer;
@@ -210,6 +222,7 @@
     </svg>
     <div>CutOut<small>remove a column or row</small></div>
   </div>
+  <button class="ghost" id="btnCancel">Cancel</button>
   <button class="icon ghost" id="btnOpen" title="Open another image" aria-label="Open another image">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="8.5" cy="10" r="1.7"/><path d="M4.5 17.5 9 13a2 2 0 0 1 2.8 0l6.4 6.4"/>
@@ -410,6 +423,9 @@
    native shell (the iOS app injects __CUTOUT_NATIVE__ before we run)
    ══════════════════════════════════════════════════════════════ */
 const NATIVE = !!window.__CUTOUT_NATIVE__;
+/* HOSTED = we are running inside another app's screen, editing one picture it
+   gave us. The finished image goes back to that app rather than to Photos. */
+const HOSTED = !!window.__CUTOUT_HOSTED__;
 const bridge = (cmd, extra) => window.webkit?.messageHandlers?.cutout?.postMessage({ cmd, ...extra });
 
 /* ══════════════════════════════════════════════════════════════
@@ -1571,6 +1587,7 @@ $('file').addEventListener('change', e => { const f = e.target.files[0]; e.targe
 const openImage = () => NATIVE ? bridge('pick') : $('file').click();
 $('btnPick').addEventListener('click', openImage);
 $('btnOpen').addEventListener('click', openImage);
+$('btnCancel').addEventListener('click', () => bridge('cancel'));
 
 window.__cutoutNative = {
   openImage(base64, mime, name) {
@@ -1680,11 +1697,17 @@ async function doSave() {
   let blob = saveBlob;
   if (!blob) blob = await new Promise(r => flatten().toBlob(r, mime, mime === 'image/jpeg' ? 0.95 : undefined));
 
-  if (NATIVE) {                                   // straight into the photo library
+  if (NATIVE) {
+    // Hosted: back to the app that opened us. On our own: into the photo library.
+    // Either way the native side is handed the same bytes; only it knows where
+    // they belong, so the size and format travel with them.
     const buf = new Uint8Array(await blob.arrayBuffer());
     let bin = '';
     for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
-    bridge('save', { data: btoa(bin) });
+    bridge('save', {
+      data: btoa(bin), mime, name: `${srcName}.${ext}`,
+      width: work.width, height: work.height,
+    });
     return;
   }
 
@@ -1722,6 +1745,10 @@ window.CutOut = {
 window.addEventListener('resize', () => { resize(); clampView(); render(); });
 window.addEventListener('orientationchange', () => setTimeout(() => { resize(); fitView(); }, 250));
 loadPrefs(); syncSheet();
+if (HOSTED) {
+  document.body.classList.add('hosted');
+  $('btnSave').textContent = 'Use this';
+}
 resize(); syncUI();
 
 if ('serviceWorker' in navigator) {
