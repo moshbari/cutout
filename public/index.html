@@ -157,6 +157,8 @@
   .ctx{display:flex;align-items:center;gap:7px;min-height:42px}
   .ctx .sep{width:1px;height:26px;background:var(--line);flex:0 0 auto}
   .ctx button.icon{min-width:38px;padding:8px 7px}
+  .blur-f{display:flex;align-items:center;gap:6px;flex:1 1 0;min-width:0;font-size:12px;color:var(--dim)}
+  .blur-f input[type=range]{flex:1 1 auto;min-width:0;width:auto;accent-color:var(--accent)}
 
   /* ---------- floating cut action ---------- */
   #cutFab{
@@ -309,6 +311,26 @@
     </button>
   </div>
 
+  <!-- blur: strength for the selected blur (or the next one), brush size while painting -->
+  <div class="row ctx hidden" id="ctxBlur">
+    <label class="blur-f"><span>Blur</span>
+      <input type="range" id="blurAmt" min="1" max="100" step="1" value="35" aria-label="Blur strength"></label>
+    <label class="blur-f" id="fBrush"><span>Brush</span>
+      <input type="range" id="brushSize" min="12" max="90" step="1" value="40" aria-label="Brush size"></label>
+    <div class="sep hidden" id="blurSep"></div>
+    <button class="icon ghost hidden" id="blurDown" title="Smaller" aria-label="Smaller">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>
+    </button>
+    <button class="icon ghost hidden" id="blurUp" title="Bigger" aria-label="Bigger">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+    <button class="icon ghost hidden" id="blurDel" title="Delete" aria-label="Delete">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 7h16M9 7V5h6v2M6.5 7l1 13h9l1-13M10.5 10.5v6M13.5 10.5v6"/>
+      </svg>
+    </button>
+  </div>
+
   <!-- tool strip -->
   <div class="row">
     <div class="tools" id="toolStrip">
@@ -328,6 +350,9 @@
       </button>
       <button class="tool" data-tool="text">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 6.5h14M12 6.5V18M9 18h6"/></svg>Text
+      </button>
+      <button class="tool" data-tool="blur">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2s-6 6.6-6 11a6 6 0 0 0 12 0c0-4.4-6-11-6-11Z"/><path d="M9.2 14.6a2.9 2.9 0 0 0 2.8 2.8" opacity=".55"/></svg>Blur
       </button>
     </div>
     <button class="icon ghost" id="btnGear" aria-label="Options" style="min-height:50px">
@@ -407,6 +432,11 @@
       padding, corners and all. Nothing is baked in until you <b>Save</b>, so you can move and
       recolour marks for as long as you like.
       <br><br>
+      <b style="color:var(--text)">Blurring</b><br>
+      Pick Blur and <b>brush</b> over anything private. Going over the same spot twice never makes
+      it blurrier. Tap a blur later to change its strength, drag its corners to resize it, or drag
+      the round grip above it to move it. Blur always sits on the picture, under your other marks.
+      <br><br>
       <span class="desk" style="display:none">Desktop: <span class="kbd">←</span><span class="kbd">→</span> nudge,
       <span class="kbd">Enter</span> cut, <span class="kbd">⌘Z</span> undo, <span class="kbd">⌘V</span> paste.</span>
     </div>
@@ -445,6 +475,9 @@ let srcName  = 'cutout';
    you save. They are only ever baked into pixels at export time. */
 const PALETTE = ['#ff3b30', '#ff9500', '#ffd60a', '#34c759', '#0a84ff', '#bf5af2', '#ffffff', '#12151a'];
 const mark = { color: '#ff3b30' };
+/* blur.amount is a 1–100 strength (turned into pixels against the image size when drawn);
+   blur.brush is the brush diameter in SCREEN px, so it feels the same under a finger at any zoom */
+const blur = { amount: 35, brush: 40 };
 const clone = o => JSON.parse(JSON.stringify(o));
 
 const view = { scale: 1, tx: 0, ty: 0 };
@@ -473,6 +506,8 @@ function loadPrefs() {
   if (Number.isFinite(p.lineWidth) && p.lineWidth >= 1 && p.lineWidth <= 14) opts.lineWidth = Math.round(p.lineWidth);
   if (FORMATS.includes(p.fmt)) opts.fmt = p.fmt;
   if (PALETTE.includes(p.markColor)) mark.color = p.markColor;
+  if (Number.isFinite(p.blurAmount) && p.blurAmount >= 1 && p.blurAmount <= 100) blur.amount = Math.round(p.blurAmount);
+  if (Number.isFinite(p.blurBrush) && p.blurBrush >= 12 && p.blurBrush <= 90) blur.brush = Math.round(p.blurBrush);
 }
 
 function savePrefs() {
@@ -480,6 +515,7 @@ function savePrefs() {
     localStorage.setItem(PREFS_KEY, JSON.stringify({
       snap: opts.snap, seam: opts.seam, color: opts.color,
       lineWidth: opts.lineWidth, fmt: opts.fmt, markColor: mark.color,
+      blurAmount: blur.amount, blurBrush: blur.brush,
     }));
   } catch {}   // private browsing / a full store must never break the editor
 }
@@ -632,6 +668,7 @@ function rebuild() {
   for (const op of ops) c = applyCut(c, op);
   work = c;
   candCache = {};
+  blurCache.clear();
   saveBlob = null;
   bakeBlob();
 }
@@ -643,6 +680,11 @@ function shiftAnnosThroughCut(axis, a, b) {
   const gap = b - a;
   const move = v => v <= a ? v : v >= b ? v - gap : a;
   for (const an of annos) {
+    if (an.type === 'blur') {
+      const k = axis === 'v' ? 0 : 1;
+      for (const s of an.strokes) for (let i = k; i < s.pts.length; i += 2) s.pts[i] = move(s.pts[i]);
+      continue;
+    }
     if (axis === 'v') {
       if (an.type === 'arrow') { an.x1 = move(an.x1); an.x2 = move(an.x2); }
       else { const r = move(an.x + (an.w || 0)); an.x = move(an.x); if (an.w != null) an.w = Math.max(1, r - an.x); }
@@ -871,7 +913,165 @@ function haloStroke(ctx, path, color, width) {
   ctx.restore();
 }
 
+/* ── blur ──────────────────────────────────────────────────────────
+   A blur is a live mark like any other: brush strokes (points + a width, in image
+   pixels) plus a strength. It is never baked until Save, so it can be re-selected,
+   moved, resized and made stronger or weaker at any time.
+
+   Why brushing twice never gets blurrier: the strokes only build a MASK — painting
+   opaque over opaque is still just opaque — and the mask then cuts the pixels out of
+   ONE blurred copy of the clean picture. The blur is never run on something already
+   blurred, so overlapping strokes, and even overlapping blur marks, can't stack. */
+const blurCache = new Map();       // strength → full-size blurred copy of `work`
+/// Does this canvas really blur? Older iOS WebViews accept `ctx.filter` and silently ignore
+/// it, so draw a hard edge through a blur and look for a softened pixel.
+const CANVAS_FILTER = (() => {
+  try {
+    const c = makeCanvas(9, 1), x = c.getContext('2d');
+    x.filter = 'blur(2px)';
+    x.fillStyle = '#000'; x.fillRect(0, 0, 4, 1);
+    return x.getImageData(5, 0, 1, 1).data[3] > 0;
+  } catch { return false; }
+})();
+
+const blurPx = amount => Math.max(1, amount / 100 * Math.max(work.width, work.height) / 22);
+
+/// A soft, strong blur that costs almost nothing and needs no canvas `filter` (which
+/// older iOS WebViews don't have): shrink the picture, box-blur the small copy three
+/// times (≈ gaussian), then let the browser's smoothing scale it back up.
+function blurredWork(amount) {
+  if (blurCache.has(amount)) return blurCache.get(amount);
+  const W = work.width, H = work.height, r = blurPx(amount);
+  if (CANVAS_FILTER) {
+    // native gaussian where the browser has it (Chrome, Safari 18+) — far faster.
+    // Pad with the picture's own edge so the blur doesn't fade to transparent at the borders.
+    const pad = Math.ceil(r * 2);
+    const src = makeCanvas(W + pad * 2, H + pad * 2), s = src.getContext('2d');
+    s.drawImage(work, pad, pad);
+    s.drawImage(work, 0, 0, W, 1, pad, 0, W, pad);  s.drawImage(work, 0, H - 1, W, 1, pad, H + pad, W, pad);
+    s.drawImage(src, pad, 0, 1, H + pad * 2, 0, 0, pad, H + pad * 2);
+    s.drawImage(src, W + pad - 1, 0, 1, H + pad * 2, W + pad, 0, pad, H + pad * 2);
+    const out = makeCanvas(W, H), o = out.getContext('2d');
+    o.filter = `blur(${r}px)`;
+    o.drawImage(src, -pad, -pad);
+    o.filter = 'none';
+    if (blurCache.size >= 2) blurCache.delete(blurCache.keys().next().value);
+    blurCache.set(amount, out);
+    return out;
+  }
+  const k = Math.max(2, r / 3);                       // never full-size: halving is invisible under a blur
+  const sw = Math.max(1, Math.round(W / k)), sh = Math.max(1, Math.round(H / k));
+  const small = makeCanvas(sw, sh), sctx = small.getContext('2d', { willReadFrequently: true });
+  sctx.imageSmoothingEnabled = true; sctx.imageSmoothingQuality = 'high';
+  sctx.drawImage(work, 0, 0, sw, sh);
+  const img = sctx.getImageData(0, 0, sw, sh);
+  const rad = Math.max(1, Math.round(r / k));
+  for (let pass = 0; pass < 3; pass++) { boxBlur(img.data, sw, sh, rad, true); boxBlur(img.data, sw, sh, rad, false); }
+  sctx.putImageData(img, 0, 0);
+  const out = makeCanvas(W, H), octx = out.getContext('2d');
+  octx.imageSmoothingEnabled = true; octx.imageSmoothingQuality = 'high';
+  octx.drawImage(small, 0, 0, W, H);
+  if (blurCache.size >= 2) blurCache.delete(blurCache.keys().next().value);   // each copy is a full picture of memory
+  blurCache.set(amount, out);
+  return out;
+}
+
+/// One running-sum box blur pass along rows (horiz) or columns, edges clamped.
+/// Written as flat loops over a copied line — this runs on every strength change.
+function boxBlur(d, w, h, r, horiz) {
+  const n = horiz ? w : h, m = horiz ? h : w, span = r * 2 + 1;
+  const step = horiz ? 4 : w * 4;                     // byte distance between neighbours on the line
+  const line = new Uint8ClampedArray(n * 4);
+  for (let j = 0; j < m; j++) {
+    const base = horiz ? j * w * 4 : j * 4;
+    for (let i = 0, p = base; i < n; i++, p += step) {
+      const q = i * 4; line[q] = d[p]; line[q + 1] = d[p + 1]; line[q + 2] = d[p + 2]; line[q + 3] = d[p + 3];
+    }
+    let s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+    for (let i = -r; i <= r; i++) {
+      const q = (i < 0 ? 0 : i >= n ? n - 1 : i) * 4;
+      s0 += line[q]; s1 += line[q + 1]; s2 += line[q + 2]; s3 += line[q + 3];
+    }
+    for (let i = 0, p = base; i < n; i++, p += step) {
+      d[p] = s0 / span; d[p + 1] = s1 / span; d[p + 2] = s2 / span; d[p + 3] = s3 / span;
+      const add = Math.min(i + r + 1, n - 1) * 4, sub = Math.max(i - r, 0) * 4;
+      s0 += line[add] - line[sub]; s1 += line[add + 1] - line[sub + 1];
+      s2 += line[add + 2] - line[sub + 2]; s3 += line[add + 3] - line[sub + 3];
+    }
+  }
+}
+
+function strokePath(ctx, s) {
+  const p = s.pts;
+  ctx.lineWidth = s.w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(p[0], p[1]);
+  if (p.length === 2) ctx.lineTo(p[0] + 0.01, p[1]);           // a single dab still paints a dot
+  for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i], p[i + 1]);
+  ctx.stroke();
+}
+
+const blurScratch = makeCanvas(1, 1);
+function drawBlur(ctx, a) {
+  if (!a.strokes.length) return;
+  const b = annoBounds(a);
+  const x0 = Math.max(0, Math.floor(b.x)), y0 = Math.max(0, Math.floor(b.y));
+  const x1 = Math.min(work.width, Math.ceil(b.x + b.w)), y1 = Math.min(work.height, Math.ceil(b.y + b.h));
+  if (x1 <= x0 || y1 <= y0) return;
+  const w = x1 - x0, h = y1 - y0;
+  blurScratch.width = w; blurScratch.height = h;             // resizing also clears it
+  const m = blurScratch.getContext('2d');
+  m.translate(-x0, -y0);
+  m.strokeStyle = '#000';
+  for (const s of a.strokes) strokePath(m, s);                // mask: overlaps stay one layer
+  m.setTransform(1, 0, 0, 1, 0, 0);
+  m.globalCompositeOperation = 'source-in';
+  m.drawImage(blurredWork(a.amount), x0, y0, w, h, 0, 0, w, h);
+  m.globalCompositeOperation = 'source-over';
+  ctx.drawImage(blurScratch, x0, y0);
+}
+
+function blurBounds(a) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const s of a.strokes) {
+    const r = s.w / 2, p = s.pts;
+    for (let i = 0; i < p.length; i += 2) {
+      if (p[i] - r < x0) x0 = p[i] - r; if (p[i] + r > x1) x1 = p[i] + r;
+      if (p[i + 1] - r < y0) y0 = p[i + 1] - r; if (p[i + 1] + r > y1) y1 = p[i + 1] + r;
+    }
+  }
+  if (x0 === Infinity) return { x: 0, y: 0, w: 0, h: 0 };
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/// Move a blur, or stretch it from one box to another — every point and the brush
+/// width travel with it, so it keeps its shape.
+function transformBlur(a, start, from, to) {
+  const kx = to.w / Math.max(1e-6, from.w), ky = to.h / Math.max(1e-6, from.h);
+  const kw = Math.sqrt(Math.abs(kx * ky));
+  a.strokes = start.strokes.map(s => ({
+    w: Math.max(1, s.w * kw),
+    pts: s.pts.map((v, i) => i % 2 ? to.y + (v - from.y) * ky : to.x + (v - from.x) * kx),
+  }));
+}
+
+/// A blur is hit by its painted area, not its bounding box — a long diagonal swipe's
+/// box is mostly untouched picture.
+function insideBlur(a, ix, iy, pad) {
+  for (const s of a.strokes) {
+    const p = s.pts, r = s.w / 2 + pad;
+    if (p.length === 2 && Math.hypot(ix - p[0], iy - p[1]) <= r) return true;
+    for (let i = 2; i < p.length; i += 2) {
+      const ax = p[i - 2], ay = p[i - 1], dx = p[i] - ax, dy = p[i + 1] - ay;
+      const t = clamp(((ix - ax) * dx + (iy - ay) * dy) / (dx * dx + dy * dy || 1), 0, 1);
+      if (Math.hypot(ix - (ax + t * dx), iy - (ay + t * dy)) <= r) return true;
+    }
+  }
+  return false;
+}
+
 function annoBounds(a) {
+  if (a.type === 'blur') return blurBounds(a);
   if (a.type === 'arrow') {
     return { x: Math.min(a.x1, a.x2), y: Math.min(a.y1, a.y2),
              w: Math.abs(a.x2 - a.x1), h: Math.abs(a.y2 - a.y1) };
@@ -930,7 +1130,12 @@ function drawAnno(ctx, a) {
   }
 }
 
-const drawAnnos = ctx => { for (const a of annos) drawAnno(ctx, a); };
+/// Blur always sits right on the picture and every other mark sits on top of it,
+/// whatever order they were made in — an arrow pointing at a blurred name stays sharp.
+function drawAnnos(ctx) {
+  for (const a of annos) if (a.type === 'blur') drawBlur(ctx, a);
+  for (const a of annos) if (a.type !== 'blur') drawAnno(ctx, a);
+}
 
 /// Marks scale with the image, not the screen, so a note on a 4000px screenshot
 /// looks the same as one on a 800px screenshot.
@@ -1005,6 +1210,15 @@ function render() {
 
   if (showOriginal) { badge('ORIGINAL'); return; }
   if (band) drawBand(w, h);
+  if (brushAt) {
+    // the brush outline, so you can see how much a stroke will cover
+    vctx.save();
+    vctx.beginPath(); vctx.arc(brushAt.x, brushAt.y, blur.brush / 2, 0, 7);
+    vctx.lineWidth = 3; vctx.strokeStyle = 'rgba(0,0,0,.45)'; vctx.stroke();
+    vctx.lineWidth = 1.5; vctx.strokeStyle = 'rgba(255,255,255,.95)'; vctx.stroke();
+    vctx.restore();
+    return;                                  // no selection chrome in the way while painting
+  }
   if (sel >= 0 && annos[sel]) drawSelection(annos[sel]);
 }
 
@@ -1018,8 +1232,11 @@ function handlePoints(a) {
   }
   const b = annoBounds(a);
   if (a.type === 'text') return [{ id: 'size', x: toScreenX(b.x + b.w), y: toScreenY(b.y + b.h) }];
-  return [{ id: 'tl', x: toScreenX(b.x), y: toScreenY(b.y) },
-          { id: 'br', x: toScreenX(b.x + b.w), y: toScreenY(b.y + b.h) }];
+  const corners = [{ id: 'tl', x: toScreenX(b.x), y: toScreenY(b.y) },
+                   { id: 'br', x: toScreenX(b.x + b.w), y: toScreenY(b.y + b.h) }];
+  // brushing inside a selected blur paints more of it, so moving needs its own grip
+  if (a.type === 'blur') corners.push({ id: 'move', x: toScreenX(b.x + b.w / 2), y: Math.max(HANDLE, toScreenY(b.y) - 26) });
+  return corners;
 }
 
 function drawSelection(a) {
@@ -1032,6 +1249,15 @@ function drawSelection(a) {
   vctx.strokeRect(x - 4, y - 4, w + 8, h + 8);
   vctx.setLineDash([]);
   for (const p of handlePoints(a)) {
+    if (p.id === 'move') {
+      vctx.beginPath(); vctx.arc(p.x, p.y, HANDLE, 0, 7);
+      vctx.fillStyle = '#0a84ff'; vctx.fill();
+      vctx.lineWidth = 2; vctx.strokeStyle = '#fff'; vctx.stroke();
+      vctx.lineCap = 'round'; vctx.beginPath();
+      vctx.moveTo(p.x - 6, p.y); vctx.lineTo(p.x + 6, p.y); vctx.moveTo(p.x, p.y - 6); vctx.lineTo(p.x, p.y + 6);
+      vctx.stroke();
+      continue;
+    }
     vctx.beginPath(); vctx.arc(p.x, p.y, HANDLE / 2 + 1, 0, 7);
     vctx.fillStyle = '#fff'; vctx.fill();
     vctx.lineWidth = 2.5; vctx.strokeStyle = '#0a84ff'; vctx.stroke();
@@ -1137,7 +1363,8 @@ const hideLoupe = () => loupe.style.display = 'none';
    pointer input — 1 finger draws, 2 fingers pan+zoom
    ══════════════════════════════════════════════════════════════ */
 const pts = new Map();
-let drag = null;      // {mode:'new'|'a'|'b'|'move', ...}
+let drag = null;      // {mode:'new'|'a'|'b'|'move'|'paint', ...}
+let brushAt = null;   // screen point under the blur brush while painting
 let gesture = null;   // pinch state
 
 function localPt(e) {
@@ -1154,7 +1381,7 @@ viewC.addEventListener('pointerdown', e => {
   pts.set(e.pointerId, localPt(e));
 
   if (pts.size === 2) {
-    drag = null;
+    drag = null; brushAt = null;
     const [p, q] = [...pts.values()];
     gesture = {
       d0: Math.hypot(p.x - q.x, p.y - q.y),
@@ -1178,8 +1405,9 @@ viewC.addEventListener('pointerdown', e => {
         return;
       }
     }
-    // 2. then its body — drag to move it
-    if (insideAnno(annos[sel], ix, iy, 10 / view.scale)) {
+    // 2. then its body — drag to move it (except a blur under the blur brush: that paints more)
+    const brushingBlur = tool === 'blur' && annos[sel].type === 'blur';
+    if (!brushingBlur && insideAnno(annos[sel], ix, iy, 10 / view.scale)) {
       pushHistory();
       drag = { mode: 'moveAnno', start: clone(annos[sel]), ix, iy };
       return;
@@ -1206,6 +1434,7 @@ viewC.addEventListener('pointerdown', e => {
 /// empty space, and both grabbing that empty space and being unable to draw in it
 /// feel broken.
 function insideAnno(a, ix, iy, pad) {
+  if (a.type === 'blur') return insideBlur(a, ix, iy, pad);
   if (a.type === 'arrow') {
     const dx = a.x2 - a.x1, dy = a.y2 - a.y1;
     const len2 = dx * dx + dy * dy || 1;
@@ -1217,9 +1446,11 @@ function insideAnno(a, ix, iy, pad) {
 }
 
 /// Topmost mark under the point, or -1. Generous slop so thin marks are still tappable.
+/// Blurs are drawn beneath everything else, so they are hit last too.
 function hitAnno(ix, iy) {
   const pad = 12 / view.scale;
-  for (let i = annos.length - 1; i >= 0; i--) if (insideAnno(annos[i], ix, iy, pad)) return i;
+  for (let i = annos.length - 1; i >= 0; i--) if (annos[i].type !== 'blur' && insideAnno(annos[i], ix, iy, pad)) return i;
+  for (let i = annos.length - 1; i >= 0; i--) if (annos[i].type === 'blur' && insideAnno(annos[i], ix, iy, 0)) return i;
   return -1;
 }
 
@@ -1231,6 +1462,16 @@ function newMark(x, y) {
 }
 
 function resizeMark(a, start, id, dx, dy) {
+  if (a.type === 'blur') {
+    const s = blurBounds(start), min = 8 / view.scale;
+    let to;
+    if (id === 'move')    to = { x: s.x + dx, y: s.y + dy, w: s.w, h: s.h };
+    else if (id === 'tl') to = { x: Math.min(s.x + dx, s.x + s.w - min), y: Math.min(s.y + dy, s.y + s.h - min),
+                                 w: Math.max(min, s.w - dx), h: Math.max(min, s.h - dy) };
+    else                  to = { x: s.x, y: s.y, w: Math.max(min, s.w + dx), h: Math.max(min, s.h + dy) };
+    transformBlur(a, start, s, to);
+    return;
+  }
   if (a.type === 'arrow') {
     if (id === 'p1') { a.x1 = start.x1 + dx; a.y1 = start.y1 + dy; }
     else             { a.x2 = start.x2 + dx; a.y2 = start.y2 + dy; }
@@ -1274,13 +1515,42 @@ viewC.addEventListener('pointermove', e => {
   }
   if (drag.mode === 'moveAnno') {
     const a = annos[sel], s = drag.start, dx = ix - drag.ix, dy = iy - drag.iy;
-    if (a.type === 'arrow') { a.x1 = s.x1 + dx; a.y1 = s.y1 + dy; a.x2 = s.x2 + dx; a.y2 = s.y2 + dy; }
+    if (a.type === 'blur') resizeMark(a, s, 'move', dx, dy);
+    else if (a.type === 'arrow') { a.x1 = s.x1 + dx; a.y1 = s.y1 + dy; a.x2 = s.x2 + dx; a.y2 = s.y2 + dy; }
     else { a.x = s.x + dx; a.y = s.y + dy; }
+    render(); return;
+  }
+
+  if (drag.mode === 'paint') {
+    const s = annos[sel].strokes[annos[sel].strokes.length - 1], n = s.pts.length;
+    brushAt = p;
+    // skip points closer than ~1.5 screen px — a slow finger would otherwise pile up thousands
+    if (Math.hypot(ix - s.pts[n - 2], iy - s.pts[n - 1]) * view.scale >= 1.5) s.pts.push(ix, iy);
     render(); return;
   }
 
   if (drag.mode === 'new') {
     const dx = Math.abs(ix - drag.ix) * view.scale, dy = Math.abs(iy - drag.iy) * view.scale;
+
+    if (tool === 'blur') {
+      if (Math.max(dx, dy) < 4) return;        // still could be a tap that selects a blur
+      pushHistory();
+      const w = blur.brush / view.scale;
+      const stroke = { w, pts: [drag.ix, drag.iy, ix, iy] };
+      // brushing in or right beside the selected blur grows that same blur, so one
+      // area stays one mark with one strength instead of a pile of separate ones
+      const cur = sel >= 0 && annos[sel] && annos[sel].type === 'blur' ? annos[sel] : null;
+      const b = cur && blurBounds(cur);
+      if (cur && drag.ix >= b.x - w && drag.ix <= b.x + b.w + w && drag.iy >= b.y - w && drag.iy <= b.y + b.h + w) {
+        cur.strokes.push(stroke);
+      } else {
+        annos.push({ type: 'blur', amount: blur.amount, strokes: [stroke] });
+        sel = annos.length - 1;
+      }
+      drag = { mode: 'paint' };
+      brushAt = p;
+      render(); syncUI(); return;
+    }
 
     if (tool !== 'cut') {
       // text is placed by tapping, not dragging — nothing to preview
@@ -1334,6 +1604,11 @@ function endPointer(e) {
   if (pts.size < 2) gesture = null;
   if (pts.size === 0) {
     hideLoupe();
+
+    if (drag && drag.mode === 'paint') {
+      drag = null; brushAt = null;
+      render(); syncUI(); return;
+    }
 
     if (drag && (drag.mode === 'handle' || drag.mode === 'moveAnno')) {
       const still = JSON.stringify(annos[sel]) === JSON.stringify(drag.start);
@@ -1435,10 +1710,20 @@ function syncUI() {
   $('btnSave').disabled = !work;
   $('cutFab').classList.toggle('show', tool === 'cut' && !!band);
 
-  const marked = sel >= 0 && !!annos[sel];
+  const selBlur = sel >= 0 && annos[sel] && annos[sel].type === 'blur';
+  const marked = sel >= 0 && !!annos[sel] && !selBlur;
+  const blurRow = selBlur || (tool === 'blur' && !marked);
   $('ctxMark').classList.toggle('hidden', !marked);
-  $('ctxCut').classList.toggle('hidden', marked);
+  $('ctxBlur').classList.toggle('hidden', !blurRow);
+  $('ctxCut').classList.toggle('hidden', marked || blurRow);
   $('markEdit').classList.toggle('hidden', !marked || annos[sel].type !== 'text');
+  // selected blur: strength + resize + delete. Blur tool with nothing picked: strength + brush.
+  $('blurAmt').value = selBlur ? annos[sel].amount : blur.amount;
+  $('brushSize').value = blur.brush;
+  $('fBrush').classList.toggle('hidden', selBlur && tool !== 'blur');
+  // a phone bar can't hold two sliders AND the size buttons — while brushing, the corners resize it
+  for (const id of ['blurSep', 'blurDel']) $(id).classList.toggle('hidden', !selBlur);
+  for (const id of ['blurDown', 'blurUp']) $(id).classList.toggle('hidden', !selBlur || tool === 'blur');
   if (marked) {
     const c = annos[sel].color;
     for (const dot of $('swatches').children) dot.classList.toggle('on', dot.dataset.c === c);
@@ -1466,6 +1751,7 @@ $('toolStrip').addEventListener('click', e => {
   render(); syncUI();
   hint(tool === 'cut' ? 'Drag across the part you want gone.'
      : tool === 'text' ? 'Tap where the note should go.'
+     : tool === 'blur' ? 'Brush over anything to blur it. Tap a blur to change it.'
      : 'Drag to draw. Tap a mark to select it.', 2400);
 });
 
@@ -1490,16 +1776,43 @@ function resizeSelected(factor) {
   if (sel < 0 || !annos[sel]) return;
   pushHistory();
   const a = annos[sel];
-  if (a.type === 'text') a.size = clamp(Math.round(a.size * factor), 9, Math.round(Math.max(work.width, work.height) / 4));
+  if (a.type === 'blur') {                       // grow / shrink around its own centre
+    const s = blurBounds(a), w = s.w * factor, h = s.h * factor;
+    transformBlur(a, clone(a), s, { x: s.x + (s.w - w) / 2, y: s.y + (s.h - h) / 2, w, h });
+  } else if (a.type === 'text') a.size = clamp(Math.round(a.size * factor), 9, Math.round(Math.max(work.width, work.height) / 4));
   else a.width = clamp(Math.round((a.width || 4) * factor * 10) / 10, 1, 200);
   render(); syncUI();
 }
 $('szUp').addEventListener('click', () => resizeSelected(1.25));
 $('szDown').addEventListener('click', () => resizeSelected(1 / 1.25));
-$('markDel').addEventListener('click', () => {
+const deleteSelected = () => {
   if (sel < 0) return;
   pushHistory(); annos.splice(sel, 1); sel = -1; render(); syncUI();
+};
+$('markDel').addEventListener('click', deleteSelected);
+$('blurDel').addEventListener('click', deleteSelected);
+$('blurUp').addEventListener('click', () => resizeSelected(1.2));
+$('blurDown').addEventListener('click', () => resizeSelected(1 / 1.2));
+
+/* ---- blur strength + brush ----
+   Dragging the slider updates the selected blur live, but only costs one undo step. */
+let blurSliding = false;
+$('blurAmt').addEventListener('input', e => {
+  const v = +e.target.value;
+  blur.amount = v;                               // the next blur starts at the last strength used
+  if (sel >= 0 && annos[sel] && annos[sel].type === 'blur') {
+    if (!blurSliding) { pushHistory(); blurSliding = true; }
+    annos[sel].amount = v;
+    render();
+  }
 });
+$('blurAmt').addEventListener('change', () => { blurSliding = false; savePrefs(); syncUI(); });
+$('brushSize').addEventListener('input', e => {
+  blur.brush = +e.target.value;
+  const r = stage.getBoundingClientRect();       // show the size you're picking, mid-picture
+  brushAt = { x: r.width / 2, y: r.height / 2 }; render();
+});
+$('brushSize').addEventListener('change', () => { brushAt = null; savePrefs(); render(); });
 
 /* ---- text editing ---- */
 let editing = -1, editingIsNew = false, editSnap = null;
@@ -1737,7 +2050,7 @@ window.CutOut = {
   get marks() { return annos; },
   get sel() { return sel; },
   get tool() { return tool; },
-  opts, mark, candidates, fit: fitView, cut: commitCut, undo, redo: redoOp, reset, flatten,
+  opts, mark, blur, candidates, fit: fitView, cut: commitCut, undo, redo: redoOp, reset, flatten,
   setBand(axis, a, b) { band = { axis, a, b }; render(); syncUI(); return band; },
   select(i) { sel = i; render(); syncUI(); return sel; },
 };

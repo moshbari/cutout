@@ -34,6 +34,11 @@ enum DemoMode {
         case 3: return "CutOut.setBand('v', 700, 940); CutOut.cut();"// the gap closed
         case 4: return marks + "CutOut.select(2);"                   // a note selected, handles + colours
         case 5: return "CutOut.setBand('h', 266, 354);"              // a row instead
+        case 8: return marks + """
+          CutOut.marks.push({type:'blur', amount:45, strokes:[{w:64, pts:[716,222, 924,222]}, {w:64, pts:[716,310, 924,310]}, {w:64, pts:[716,398, 924,398]}, {w:64, pts:[716,486, 924,486]}, {w:64, pts:[716,574, 924,574]}, {w:64, pts:[716,662, 924,662]}, {w:64, pts:[716,750, 924,750]}]});
+          document.querySelector('[data-tool=blur]').click();
+          CutOut.select(CutOut.marks.length - 1);
+        """                                                          // blur under the marks, selected
         case 7: return "CutOut.setBand('v', 700, 940); CutOut.cut(); document.getElementById('btnGear').click();"
         default: return nil
         }
