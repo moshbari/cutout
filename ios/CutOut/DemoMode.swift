@@ -40,6 +40,7 @@ enum DemoMode {
           CutOut.select(CutOut.marks.length - 1);
         """                                                          // blur under the marks, selected
         case 7: return "CutOut.setBand('v', 700, 940); CutOut.cut(); document.getElementById('btnGear').click();"
+        case 11: return "document.getElementById('btnPick').click();"   // Photos / Files choice
         case 10: return """
           setTimeout(() => { document.getElementById('pgNext').click();
             setTimeout(() => { document.getElementById('btnRotate').click();
