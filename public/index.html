@@ -2061,9 +2061,25 @@ async function doSave() {
 
   const file = new File([blob], `${srcName}-cutout.${ext}`, { type: mime });
 
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+  // Phones: the share sheet is how you reach "Save Image" / Photos.
+  // Computers: a share menu is the wrong thing — save a file like any desktop app.
+  const onPhone = matchMedia('(pointer: coarse)').matches;
+  if (onPhone && navigator.canShare && navigator.canShare({ files: [file] })) {
     try { await navigator.share({ files: [file] }); return; }
     catch (err) { if (err && err.name === 'AbortError') return; }
+  }
+  // Chrome / Edge on a computer: a real Save As window, so any folder works —
+  // including Google Drive / iCloud Drive / Dropbox folders on that computer.
+  if (!onPhone && window.showSaveFilePicker) {
+    try {
+      const handle = await showSaveFilePicker({
+        suggestedName: file.name,
+        types: [{ description: ext.toUpperCase() + ' image', accept: { [mime]: ['.' + ext] } }],
+      });
+      const w = await handle.createWritable();
+      await w.write(blob); await w.close();
+      hint('Saved.'); return;
+    } catch (err) { if (err && err.name === 'AbortError') return; }
   }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
