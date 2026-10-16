@@ -84,6 +84,15 @@
     padding:7px 13px; border-radius:999px; font-size:12.5px; color:var(--dim);
     pointer-events:none; z-index:3; max-width:92%; text-align:center;
   }
+  /* PDF page switcher — only shown for a PDF with more than one page */
+  #pager{
+    position:absolute; left:12px; top:12px; z-index:4; display:flex; align-items:center; gap:2px;
+    background:rgba(10,12,16,.82); border:1px solid var(--line); border-radius:999px; padding:3px;
+    backdrop-filter:blur(8px);
+  }
+  #pager button{min-height:34px;min-width:40px;padding:4px 10px;border:0;border-radius:999px;background:transparent;font-size:19px}
+  #pager span{font-size:13px;color:var(--dim);padding:0 2px;font-variant-numeric:tabular-nums}
+  body.paged #hint{top:62px}
   #busy{
     position:absolute; inset:0; display:none; align-items:center; justify-content:center;
     background:rgba(8,10,13,.6); z-index:6; font-size:13px; color:var(--dim); backdrop-filter:blur(2px);
@@ -225,7 +234,7 @@
     <div>CutOut<small>remove a column or row</small></div>
   </div>
   <button class="ghost" id="btnCancel">Cancel</button>
-  <button class="icon ghost" id="btnOpen" title="Open another image" aria-label="Open another image">
+  <button class="icon ghost" id="btnOpen" title="Open another image or PDF" aria-label="Open another image or PDF">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="8.5" cy="10" r="1.7"/><path d="M4.5 17.5 9 13a2 2 0 0 1 2.8 0l6.4 6.4"/>
     </svg>
@@ -245,6 +254,11 @@
   <canvas id="view"></canvas>
   <div id="loupe"><canvas id="loupeC" width="132" height="132"></canvas></div>
   <div id="hint" class="hidden"></div>
+  <div id="pager" class="hidden">
+    <button id="pgPrev" aria-label="Previous page">‹</button>
+    <span id="pgLabel">1 / 1</span>
+    <button id="pgNext" aria-label="Next page">›</button>
+  </div>
   <div id="busy">analysing edges…</div>
   <button id="cutFab">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
@@ -267,7 +281,7 @@
     <h1>Cut it out. Mark it up.</h1>
     <p>Drag a band across a screenshot and that strip disappears — the two halves slide together with no visible edit. Then circle things, point at them, and add notes that are actually readable.</p>
     <div class="row demo">
-      <button class="primary" id="btnPick">Choose image</button>
+      <button class="primary" id="btnPick">Choose image or PDF</button>
       <button id="btnPaste" class="desk">Paste</button>
     </div>
     <p class="muted" style="font-size:12px">Works offline. Nothing is uploaded — every pixel stays on your phone.</p>
@@ -449,7 +463,7 @@
   </div>
 </div>
 
-<input type="file" id="file" accept="image/*,.heic,.heif" style="position:fixed;left:-9999px">
+<input type="file" id="file" accept="image/*,.heic,.heif,application/pdf,.pdf" style="position:fixed;left:-9999px">
 
 <script>
 (() => {
@@ -609,6 +623,7 @@ async function decodeImage(file, heic) {
 
 async function loadFile(file) {
   if (!file) return;
+  if (await isPdfFile(file)) return loadPdf(file);
   const heic = await isHeicFile(file);
   if (!heic && !file.type.startsWith('image/')) { hint('That is not an image.'); return; }
   busy(true, 'opening…');
@@ -623,6 +638,8 @@ async function loadFile(file) {
       : (file.type === 'image/jpeg' || file.type === 'image/webp') ? file.type : 'image/png';
     srcName = (file.name || 'image').replace(/\.[^.]+$/, '') || 'image';
 
+    if (doc) { doc.pdf.destroy(); doc = null; }
+    syncPager();
     ops = []; annos = []; sel = -1; band = null;
     past.length = 0; future.length = 0;
     rebuild();
@@ -635,6 +652,126 @@ async function loadFile(file) {
   } catch (e) {
     hint('Could not open that image.');
     console.error(e);
+  }
+  busy(false);
+  syncUI();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PDF — every page becomes a picture with its own cuts, marks and undo;
+   the PDF button writes all the pages back out as one file.
+   pdf.js (~1.8 MB) is fetched only the first time someone opens a PDF.
+   ══════════════════════════════════════════════════════════════ */
+const PDFJS = new URL('vendor/pdfjs-4.10.38/', location.href).href;
+let pdfLib = null;
+let doc = null;       // {pdf, index, pages:[{state, ptPerPx}]} while a PDF is open
+
+function loadPdfLib() {
+  return pdfLib || (pdfLib = import(PDFJS + 'pdf.min.mjs').then(m => {
+    m.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.mjs';
+    return m;
+  }).catch(e => { pdfLib = null; throw e; }));
+}
+
+async function isPdfFile(file) {
+  if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '')) return true;
+  try { return new TextDecoder().decode(await file.slice(0, 5).arrayBuffer()) === '%PDF-'; }
+  catch { return false; }
+}
+
+async function renderPdfPage(i) {
+  const page = await doc.pdf.getPage(i + 1);
+  const base = page.getViewport({ scale: 1 });
+  // 2× = sharp on a retina screen, and a saved page keeps its real paper size (144 dpi)
+  const scale = Math.min(2, 4096 / Math.max(base.width, base.height));
+  const vp = page.getViewport({ scale });
+  const c = makeCanvas(Math.round(vp.width), Math.round(vp.height));
+  await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+  page.cleanup();
+  return { canvas: c, ptPerPx: 1 / scale };
+}
+
+const pageEdited = st => st.ops.length || st.annos.length || st.past.length || st.future.length;
+
+/// Park the page on screen. An untouched page drops its pixels — it is re-drawn
+/// from the PDF if needed, so a 100-page file doesn't hold 100 big canvases.
+function stashPage() {
+  if (!doc) return;
+  const st = { original, ops, annos, past: past.slice(), future: future.slice() };
+  if (!pageEdited(st)) st.original = null;
+  doc.pages[doc.index].state = st;
+}
+
+async function pageState(i) {
+  const p = doc.pages[i];
+  const st = p.state || (p.state = { original: null, ops: [], annos: [], past: [], future: [] });
+  if (!st.original) {
+    const r = await renderPdfPage(i);
+    st.original = r.canvas; p.ptPerPx = r.ptPerPx;
+  }
+  return st;
+}
+
+function usePage(st) {
+  original = st.original; ops = st.ops; annos = st.annos;
+  past.length = 0; past.push(...st.past);
+  future.length = 0; future.push(...st.future);
+  sel = -1; band = null;
+  rebuild();
+}
+
+async function showPage(i) {
+  if (!doc || i < 0 || i >= doc.pages.length || i === doc.index) return;
+  if (editing >= 0) closeText(true);
+  busy(true, `page ${i + 1}…`);
+  stashPage();
+  const from = doc.index;
+  try {
+    const st = await pageState(i);
+    doc.index = i;
+    usePage(st);
+  } catch (e) {
+    console.error(e);
+    hint('Could not draw that page.');
+    usePage(await pageState(from));
+  }
+  busy(false);
+  fitView(); render(); syncUI(); syncPager();
+}
+
+function syncPager() {
+  const on = !!doc && doc.pages.length > 1;
+  $('pager').classList.toggle('hidden', !on);
+  document.body.classList.toggle('paged', on);
+  if (!on) return;
+  $('pgLabel').textContent = `${doc.index + 1} / ${doc.pages.length}`;
+  $('pgPrev').disabled = doc.index === 0;
+  $('pgNext').disabled = doc.index === doc.pages.length - 1;
+}
+
+async function loadPdf(file) {
+  busy(true, 'opening PDF…');
+  try {
+    const pdfjs = await loadPdfLib();
+    const pdf = await pdfjs.getDocument({
+      data: new Uint8Array(await file.arrayBuffer()),
+      cMapUrl: PDFJS + 'cmaps/', cMapPacked: true,
+      standardFontDataUrl: PDFJS + 'standard_fonts/',
+    }).promise;
+    if (doc) doc.pdf.destroy();
+    doc = { pdf, index: 0, pages: Array.from({ length: pdf.numPages }, () => ({ state: null, ptPerPx: 0.5 })) };
+    srcMime = 'image/png';
+    srcName = (file.name || 'document').replace(/\.[^.]+$/, '') || 'document';
+    usePage(await pageState(0));
+    emptyEl.classList.add('hidden');
+    tools.classList.remove('hidden');
+    resize(); fitView(); syncPager();
+    hint(pdf.numPages > 1
+      ? `${pdf.numPages} pages. Edit any of them, then press PDF to save them all.`
+      : 'Edit the page, then press PDF to save it.', 4500);
+  } catch (e) {
+    console.error(e);
+    hint(e && e.name === 'PasswordException' ? 'That PDF is locked with a password.' : 'Could not open that PDF.');
   }
   busy(false);
   syncUI();
@@ -2155,37 +2292,70 @@ async function deliverFile(blob, name, mime, ext, description) {
 }
 $('btnSave').addEventListener('click', doSave);
 
-/* PDF — one page the exact shape of the picture, the picture embedded as a JPEG.
-   Hand-written PDF (it's ~5 objects), so no library and still works offline. */
-function makePdf(jpeg, wPx, hPx) {
-  const w = +(wPx * 72 / 144).toFixed(2), h = +(hPx * 72 / 144).toFixed(2);   // treat as a 2× screenshot
+/* PDF — each page the exact shape of its picture, the picture embedded as a JPEG.
+   Hand-written PDF (3 objects a page), so no library and still works offline.
+   pages: [{jpeg: Uint8Array, w, h, k}] — k = PDF points per pixel. */
+function makePdf(pages) {
   const enc = new TextEncoder(), parts = [], offsets = [];
   let len = 0;
   const put = x => { const b = typeof x === 'string' ? enc.encode(x) : x; parts.push(b); len += b.length; };
   const obj = (n, body) => { offsets[n] = len; put(`${n} 0 obj\n`); body(); put('\nendobj\n'); };
-  const draw = `q ${w} 0 0 ${h} 0 0 cm /Im0 Do Q`;
+  const n = pages.length, total = 2 + n * 3;
   put('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
   obj(1, () => put('<< /Type /Catalog /Pages 2 0 R >>'));
-  obj(2, () => put('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'));
-  obj(3, () => put(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w} ${h}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`));
-  obj(4, () => { put(`<< /Type /XObject /Subtype /Image /Width ${wPx} /Height ${hPx} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`); put(jpeg); put('\nendstream'); });
-  obj(5, () => put(`<< /Length ${draw.length} >>\nstream\n${draw}\nendstream`));
+  obj(2, () => put(`<< /Type /Pages /Kids [${pages.map((_, i) => `${3 + i * 3} 0 R`).join(' ')}] /Count ${n} >>`));
+  pages.forEach((pg, i) => {
+    const id = 3 + i * 3, w = +(pg.w * pg.k).toFixed(2), h = +(pg.h * pg.k).toFixed(2);
+    const draw = `q ${w} 0 0 ${h} 0 0 cm /Im0 Do Q`;
+    obj(id, () => put(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w} ${h}] /Resources << /XObject << /Im0 ${id + 1} 0 R >> >> /Contents ${id + 2} 0 R >>`));
+    obj(id + 1, () => { put(`<< /Type /XObject /Subtype /Image /Width ${pg.w} /Height ${pg.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${pg.jpeg.length} >>\nstream\n`); put(pg.jpeg); put('\nendstream'); });
+    obj(id + 2, () => put(`<< /Length ${draw.length} >>\nstream\n${draw}\nendstream`));
+  });
   const xref = len;
-  put(`xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('')}`);
-  put(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  put(`xref\n0 ${total + 1}\n0000000000 65535 f \n${offsets.slice(1).map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('')}`);
+  put(`trailer\n<< /Size ${total + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
   return new Blob(parts, { type: 'application/pdf' });
 }
-async function savePdf() {
-  if (!work) return;
-  const img = flatten();
-  // JPEG has no transparency — put it on white first so see-through areas don't turn black
+
+// JPEG has no transparency — put it on white first so see-through areas don't turn black
+async function jpegOf(img) {
   const flat = makeCanvas(img.width, img.height), c = flat.getContext('2d');
   c.fillStyle = '#fff'; c.fillRect(0, 0, img.width, img.height); c.drawImage(img, 0, 0);
-  const jpg = await new Promise(r => flat.toBlob(r, 'image/jpeg', 0.95));
-  const pdf = makePdf(new Uint8Array(await jpg.arrayBuffer()), img.width, img.height);
-  deliverFile(pdf, `${srcName}-cutout.pdf`, 'application/pdf', 'pdf', 'PDF document');
+  const jpg = await new Promise(r => flat.toBlob(r, 'image/jpeg', 0.92));
+  return { jpeg: new Uint8Array(await jpg.arrayBuffer()), w: img.width, h: img.height };
+}
+
+async function savePdf() {
+  if (!work) return;
+  if (!doc) {
+    const pdf = makePdf([{ ...(await jpegOf(flatten())), k: 0.5 }]);    // treat as a 2× screenshot
+    return deliverFile(pdf, `${srcName}-cutout.pdf`, 'application/pdf', 'pdf', 'PDF document');
+  }
+  // every page, with whatever was done to it — replayed one at a time to keep memory flat
+  if (editing >= 0) closeText(true);
+  const cur = doc.index, out = [];
+  stashPage();
+  try {
+    for (let i = 0; i < doc.pages.length; i++) {
+      busy(true, `making PDF… page ${i + 1} of ${doc.pages.length}`);
+      const st = await pageState(i);
+      usePage(st);
+      out.push({ ...(await jpegOf(flatten())), k: doc.pages[i].ptPerPx });
+      if (i !== cur && !pageEdited(st)) st.original = null;
+    }
+  } catch (e) {
+    console.error(e);
+    hint('Could not build the PDF.');
+    out.length = 0;
+  }
+  usePage(await pageState(cur));
+  busy(false);
+  render(); syncUI();
+  if (out.length) deliverFile(makePdf(out), `${srcName}-edited.pdf`, 'application/pdf', 'pdf', 'PDF document');
 }
 $('btnPdf').addEventListener('click', savePdf);
+$('pgPrev').addEventListener('click', () => doc && showPage(doc.index - 1));
+$('pgNext').addEventListener('click', () => doc && showPage(doc.index + 1));
 
 /* ══════════════════════════════════════════════════════════════
    boot
