@@ -41,6 +41,8 @@
   .brand small{font-weight:500;color:var(--dim);font-size:11px;display:block;white-space:nowrap}
   /* on a phone the tagline is just decoration — never let it wrap the header taller */
   @media (max-width:560px){ .brand small{display:none} }
+  /* with seven buttons in the bar a phone has no room for the word — the logo stays */
+  @media (max-width:520px){ .brand > div{display:none} }
 
   /* ---------- hosted mode ----------
      Another app has embedded the editor and handed us one image to work on.
@@ -2262,6 +2264,14 @@ async function doSave() {
 
 /// Hands a finished file to the person: share sheet on a phone, Save As / downloads on a computer.
 async function deliverFile(blob, name, mime, ext, description) {
+  if (NATIVE) {
+    // the iOS app shows its own share sheet — Save to Files, Mail, AirDrop…
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    bridge('share', { data: btoa(bin), mime, name });
+    return;
+  }
   const file = new File([blob], name, { type: mime });
 
   // Phones: the share sheet is how you reach "Save Image" / Photos.
@@ -2377,7 +2387,7 @@ window.CutOut = {
 window.addEventListener('resize', () => { resize(); clampView(); render(); });
 window.addEventListener('orientationchange', () => setTimeout(() => { resize(); fitView(); }, 250));
 loadPrefs(); syncSheet();
-if (NATIVE) $('btnPdf').remove();   // the iOS app saves to Photos — no PDF there (yet)
+if (HOSTED) $('btnPdf').remove();   // hosted: the only answer is the picture handed back
 if (HOSTED) {
   document.body.classList.add('hosted');
   $('btnSave').textContent = 'Use this';

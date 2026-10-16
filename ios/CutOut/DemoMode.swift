@@ -40,7 +40,26 @@ enum DemoMode {
           CutOut.select(CutOut.marks.length - 1);
         """                                                          // blur under the marks, selected
         case 7: return "CutOut.setBand('v', 700, 940); CutOut.cut(); document.getElementById('btnGear').click();"
+        case 10: return """
+          setTimeout(() => { document.getElementById('pgNext').click();
+            setTimeout(() => { document.getElementById('btnRotate').click();
+              setTimeout(() => document.getElementById('btnPdf').click(), 2500); }, 2500); }, 3000);
+        """                                                          // PDF: page 2, rotate, save all
         default: return nil
+        }
+    }
+
+    /// A two-page PDF with real text, pushed through the same path as a file from Files.
+    static func samplePdf() -> Data {
+        let page = CGRect(x: 0, y: 0, width: 612, height: 792)
+        return UIGraphicsPDFRenderer(bounds: page).pdfData { ctx in
+            for n in 1...2 {
+                ctx.beginPage()
+                ("Q3 Report — page \(n)" as NSString).draw(at: CGPoint(x: 60, y: 70),
+                    withAttributes: [.font: UIFont.boldSystemFont(ofSize: 30)])
+                UIColor(red: 0.04, green: 0.52, blue: 1, alpha: 1).setFill()
+                UIBezierPath(rect: CGRect(x: 60, y: 140, width: 300, height: 120)).fill()
+            }
         }
     }
 
