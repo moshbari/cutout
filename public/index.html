@@ -237,6 +237,7 @@
       <path d="M2.2 12S6 5.6 12 5.6 21.8 12 21.8 12 18 18.4 12 18.4 2.2 12 2.2 12Z"/><circle cx="12" cy="12" r="2.7"/>
     </svg>
   </button>
+  <button class="ghost" id="btnPdf" title="Save as PDF" aria-label="Save as PDF" disabled>PDF</button>
   <button class="good" id="btnSave" disabled>Save</button>
 </header>
 
@@ -1743,6 +1744,7 @@ function syncUI() {
   $('btnRedo').disabled = !future.length;
   $('btnOrig').disabled = !dirty;
   $('btnSave').disabled = !work;
+  if ($('btnPdf')) $('btnPdf').disabled = !work;
   $('cutFab').classList.toggle('show', tool === 'cut' && !!band);
 
   const selBlur = sel >= 0 && annos[sel] && annos[sel].type === 'blur';
@@ -2059,7 +2061,12 @@ async function doSave() {
     return;
   }
 
-  const file = new File([blob], `${srcName}-cutout.${ext}`, { type: mime });
+  deliverFile(blob, `${srcName}-cutout.${ext}`, mime, ext, ext.toUpperCase() + ' image');
+}
+
+/// Hands a finished file to the person: share sheet on a phone, Save As / downloads on a computer.
+async function deliverFile(blob, name, mime, ext, description) {
+  const file = new File([blob], name, { type: mime });
 
   // Phones: the share sheet is how you reach "Save Image" / Photos.
   // Computers: a share menu is the wrong thing — save a file like any desktop app.
@@ -2074,7 +2081,7 @@ async function doSave() {
     try {
       const handle = await showSaveFilePicker({
         suggestedName: file.name,
-        types: [{ description: ext.toUpperCase() + ' image', accept: { [mime]: ['.' + ext] } }],
+        types: [{ description, accept: { [mime]: ['.' + ext] } }],
       });
       const w = await handle.createWritable();
       await w.write(blob); await w.close();
@@ -2088,6 +2095,38 @@ async function doSave() {
   hint('Saved to your downloads.');
 }
 $('btnSave').addEventListener('click', doSave);
+
+/* PDF — one page the exact shape of the picture, the picture embedded as a JPEG.
+   Hand-written PDF (it's ~5 objects), so no library and still works offline. */
+function makePdf(jpeg, wPx, hPx) {
+  const w = +(wPx * 72 / 144).toFixed(2), h = +(hPx * 72 / 144).toFixed(2);   // treat as a 2× screenshot
+  const enc = new TextEncoder(), parts = [], offsets = [];
+  let len = 0;
+  const put = x => { const b = typeof x === 'string' ? enc.encode(x) : x; parts.push(b); len += b.length; };
+  const obj = (n, body) => { offsets[n] = len; put(`${n} 0 obj\n`); body(); put('\nendobj\n'); };
+  const draw = `q ${w} 0 0 ${h} 0 0 cm /Im0 Do Q`;
+  put('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+  obj(1, () => put('<< /Type /Catalog /Pages 2 0 R >>'));
+  obj(2, () => put('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'));
+  obj(3, () => put(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w} ${h}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`));
+  obj(4, () => { put(`<< /Type /XObject /Subtype /Image /Width ${wPx} /Height ${hPx} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`); put(jpeg); put('\nendstream'); });
+  obj(5, () => put(`<< /Length ${draw.length} >>\nstream\n${draw}\nendstream`));
+  const xref = len;
+  put(`xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('')}`);
+  put(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return new Blob(parts, { type: 'application/pdf' });
+}
+async function savePdf() {
+  if (!work) return;
+  const img = flatten();
+  // JPEG has no transparency — put it on white first so see-through areas don't turn black
+  const flat = makeCanvas(img.width, img.height), c = flat.getContext('2d');
+  c.fillStyle = '#fff'; c.fillRect(0, 0, img.width, img.height); c.drawImage(img, 0, 0);
+  const jpg = await new Promise(r => flat.toBlob(r, 'image/jpeg', 0.95));
+  const pdf = makePdf(new Uint8Array(await jpg.arrayBuffer()), img.width, img.height);
+  deliverFile(pdf, `${srcName}-cutout.pdf`, 'application/pdf', 'pdf', 'PDF document');
+}
+$('btnPdf').addEventListener('click', savePdf);
 
 /* ══════════════════════════════════════════════════════════════
    boot
@@ -2109,6 +2148,7 @@ window.CutOut = {
 window.addEventListener('resize', () => { resize(); clampView(); render(); });
 window.addEventListener('orientationchange', () => setTimeout(() => { resize(); fitView(); }, 250));
 loadPrefs(); syncSheet();
+if (NATIVE) $('btnPdf').remove();   // the iOS app saves to Photos — no PDF there (yet)
 if (HOSTED) {
   document.body.classList.add('hosted');
   $('btnSave').textContent = 'Use this';
