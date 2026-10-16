@@ -443,7 +443,7 @@
   </div>
 </div>
 
-<input type="file" id="file" accept="image/*" style="position:fixed;left:-9999px">
+<input type="file" id="file" accept="image/*,.heic,.heif" style="position:fixed;left:-9999px">
 
 <script>
 (() => {
@@ -567,19 +567,54 @@ const toImgY    = sy => (sy - view.ty) / view.scale;
 /* ══════════════════════════════════════════════════════════════
    loading
    ══════════════════════════════════════════════════════════════ */
+/* iPhone photos are HEIC. Safari decodes them itself; Chrome / Firefox / Edge can't,
+   and Windows often hands them over with an empty file.type — so sniff the bytes too. */
+async function isHeicFile(file) {
+  if (/^image\/hei[cf]/.test(file.type) || /\.(heic|heif)$/i.test(file.name || '')) return true;
+  try {
+    const b = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+    const tag = String.fromCharCode(...b.slice(4, 12));
+    return /^ftyp(heic|heix|hevc|hevx|heim|heis|mif1|msf1)$/.test(tag);
+  } catch { return false; }
+}
+
+// libheif compiled to wasm (~3 MB) — fetched only the first time someone opens a HEIC
+let heicLib = null;
+function loadHeicLib() {
+  return heicLib || (heicLib = new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = 'vendor/heic-to-1.6.6.js';
+    s.onload = () => window.HeicTo ? ok(window.HeicTo) : fail(new Error('heic decoder missing'));
+    s.onerror = () => { heicLib = null; fail(new Error('heic decoder failed to load')); };
+    document.head.appendChild(s);
+  }));
+}
+
+async function decodeImage(file, heic) {
+  try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+  catch {
+    try { return await createImageBitmap(file); }               // Safari < 16 fallback
+    catch (e) { if (!heic) throw e; }
+  }
+  busy(true, 'converting HEIC…');
+  const heicTo = await loadHeicLib();
+  return heicTo({ blob: file, type: 'bitmap' });               // libheif applies the rotation itself
+}
+
 async function loadFile(file) {
-  if (!file || !file.type.startsWith('image/')) { hint('That is not an image.'); return; }
+  if (!file) return;
+  const heic = await isHeicFile(file);
+  if (!heic && !file.type.startsWith('image/')) { hint('That is not an image.'); return; }
   busy(true, 'opening…');
   try {
-    let bmp;
-    try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
-    catch { bmp = await createImageBitmap(file); }               // Safari < 16 fallback
+    const bmp = await decodeImage(file, heic);
 
     original = makeCanvas(bmp.width, bmp.height);
     original.getContext('2d').drawImage(bmp, 0, 0);
     bmp.close && bmp.close();
 
-    srcMime = (file.type === 'image/jpeg' || file.type === 'image/webp') ? file.type : 'image/png';
+    srcMime = heic ? 'image/jpeg'                                 // a photo — save it as one
+      : (file.type === 'image/jpeg' || file.type === 'image/webp') ? file.type : 'image/png';
     srcName = (file.name || 'image').replace(/\.[^.]+$/, '') || 'image';
 
     ops = []; annos = []; sel = -1; band = null;
