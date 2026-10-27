@@ -153,6 +153,8 @@
   .tool svg{width:19px;height:19px}
   .tool.on{background:#16202c;border-color:#3d5a80;color:var(--text)}
   .tool.on svg{color:var(--accent)}
+  #stage.panning canvas{cursor:grab}
+  #stage.panning.grabbing canvas{cursor:grabbing}
 
   /* ---------- colour + size row for the selected mark ---------- */
   /* all eight colours have to be reachable without a scroll on a 390px phone */
@@ -371,6 +373,9 @@
       <button class="tool" data-tool="blur">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2s-6 6.6-6 11a6 6 0 0 0 12 0c0-4.4-6-11-6-11Z"/><path d="M9.2 14.6a2.9 2.9 0 0 0 2.8 2.8" opacity=".55"/></svg>Blur
       </button>
+      <button class="tool" data-tool="pan" title="Pan: scroll or drag to move around">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.5V6a1.5 1.5 0 0 1 3 0v5.5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V5.5a1.5 1.5 0 0 1 3 0V12M17 9.5a1.5 1.5 0 0 1 3 0V15a6.5 6.5 0 0 1-6.5 6.5h-1.2a6 6 0 0 1-4.6-2.2L4.3 15.4a1.5 1.5 0 0 1 2.2-2L8 15"/></svg>Pan
+      </button>
     </div>
     <button class="icon ghost" id="btnRotate" title="Rotate 90°" aria-label="Rotate 90 degrees" style="min-height:50px">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
@@ -488,7 +493,7 @@ let work     = null;      // canvas after all applied cuts
 let ops      = [];        // [{axis,a,b,style,color,lineWidth}] applied in order
 let annos    = [];        // live marks, in work-image pixels, drawn over the top
 let sel      = -1;        // index of the selected mark, -1 for none
-let tool     = 'cut';     // cut | rect | ellipse | arrow | text
+let tool     = 'cut';     // cut | rect | ellipse | arrow | text | blur | pan
 let band     = null;      // {axis:'v'|'h', a, b} in CURRENT work-image pixels
 let srcMime  = 'image/png';
 let srcName  = 'cutout';
@@ -1626,6 +1631,11 @@ viewC.addEventListener('pointerdown', e => {
   if (pts.size > 2) return;
 
   const p = localPt(e);
+  if (tool === 'pan') {
+    drag = { mode: 'pan', sx: p.x, sy: p.y, tx0: view.tx, ty0: view.ty };
+    stage.classList.add('grabbing');
+    return;
+  }
   const ix = toImgX(p.x), iy = toImgY(p.y);
 
   // 1. a handle on the selected mark always wins
@@ -1739,6 +1749,12 @@ viewC.addEventListener('pointermove', e => {
   }
   if (!drag) return;
 
+  if (drag.mode === 'pan') {
+    view.tx = drag.tx0 + p.x - drag.sx;
+    view.ty = drag.ty0 + p.y - drag.sy;
+    clampView(); render(); return;
+  }
+
   const ix = toImgX(p.x), iy = toImgY(p.y);
 
   if (drag.mode === 'handle') {
@@ -1837,6 +1853,8 @@ function endPointer(e) {
   if (pts.size === 0) {
     hideLoupe();
 
+    if (drag && drag.mode === 'pan') { drag = null; stage.classList.remove('grabbing'); return; }
+
     if (drag && drag.mode === 'paint') {
       drag = null; brushAt = null;
       render(); syncUI(); return;
@@ -1910,10 +1928,19 @@ async function warmCandidates(axis) {
   render();
 }
 
-/* wheel / trackpad zoom for desktop */
+/* wheel / trackpad zoom for desktop — with the hand tool up, scrolling pans instead.
+   A plain wheel only sends deltaY (shift turns it sideways); a Magic Mouse, trackpad or
+   tilt wheel sends deltaX too, so those move in every direction. Pinch still zooms. */
 stage.addEventListener('wheel', e => {
   if (!work) return;
   e.preventDefault();
+  if (tool === 'pan' && !e.ctrlKey) {
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? stageSize().h : 1;
+    let dx = e.deltaX * unit, dy = e.deltaY * unit;
+    if (e.shiftKey && !dx) { dx = dy; dy = 0; }
+    view.tx -= dx; view.ty -= dy;
+    clampView(); render(); return;
+  }
   const p = localPt(e);
   const k = Math.exp(-e.deltaY * (e.ctrlKey ? .01 : .0022));
   const ix = toImgX(p.x), iy = toImgY(p.y);
@@ -1981,11 +2008,13 @@ $('toolStrip').addEventListener('click', e => {
   const btn = e.target.closest('button'); if (!btn) return;
   tool = btn.dataset.tool;
   if (tool !== 'cut') band = null;
+  stage.classList.toggle('panning', tool === 'pan');
   sel = -1;
   render(); syncUI();
   hint(tool === 'cut' ? 'Drag across the part you want gone.'
      : tool === 'text' ? 'Tap where the note should go.'
      : tool === 'blur' ? 'Brush over anything to blur it. Tap a blur to change it.'
+     : tool === 'pan' ? 'Scroll or drag to move around. Pinch or ctrl+scroll to zoom.'
      : 'Drag to draw. Tap a mark to select it.', 2400);
 });
 
