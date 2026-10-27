@@ -153,6 +153,12 @@
   .tool svg{width:19px;height:19px}
   .tool.on{background:#16202c;border-color:#3d5a80;color:var(--text)}
   .tool.on svg{color:var(--accent)}
+  /* shortcut letter in the corner of each tool — only where there's a keyboard */
+  .tool{position:relative}
+  .tool kbd{position:absolute;top:3px;right:4px;font:600 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+    color:var(--dim);opacity:.75;padding:1px 3px;border:1px solid currentColor;border-radius:3px}
+  .tool.on kbd{color:var(--accent);opacity:1}
+  @media (pointer:coarse){ .tool kbd{display:none} }
   #stage.panning canvas{cursor:grab}
   #stage.panning.grabbing canvas{cursor:grabbing}
   #stage.zooming canvas{cursor:zoom-in}
@@ -375,10 +381,10 @@
       <button class="tool" data-tool="blur">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2s-6 6.6-6 11a6 6 0 0 0 12 0c0-4.4-6-11-6-11Z"/><path d="M9.2 14.6a2.9 2.9 0 0 0 2.8 2.8" opacity=".55"/></svg>Blur
       </button>
-      <button class="tool" data-tool="zoom" title="Zoom (Z): scroll or drag up/down to zoom in and out">
+      <button class="tool" data-tool="zoom">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.4 15.4 5 5M10.5 7.8v5.4M7.8 10.5h5.4"/></svg>Zoom
       </button>
-      <button class="tool" data-tool="pan" title="Pan (P): scroll or drag to move around">
+      <button class="tool" data-tool="pan">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.5V6a1.5 1.5 0 0 1 3 0v5.5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V5.5a1.5 1.5 0 0 1 3 0V12M17 9.5a1.5 1.5 0 0 1 3 0V15a6.5 6.5 0 0 1-6.5 6.5h-1.2a6 6 0 0 1-4.6-2.2L4.3 15.4a1.5 1.5 0 0 1 2.2-2L8 15"/></svg>Pan
       </button>
     </div>
@@ -2029,6 +2035,15 @@ function scheduleBake() {
 }
 
 /* ---- tools ---- */
+/// one letter per tool — shown on the button and in its tooltip, e.g. "Cut (X)"
+const TOOL_KEYS = { x: 'cut', b: 'rect', c: 'ellipse', a: 'arrow', t: 'text', l: 'blur', z: 'zoom', p: 'pan' };
+for (const [k, t] of Object.entries(TOOL_KEYS)) {
+  const btn = $('toolStrip').querySelector(`[data-tool="${t}"]`);
+  btn.title = `${btn.textContent.trim()} (${k.toUpperCase()})`;
+  const kbd = document.createElement('kbd'); kbd.textContent = k.toUpperCase();
+  btn.appendChild(kbd);
+  btn.setAttribute('aria-keyshortcuts', k.toUpperCase());
+}
 $('toolStrip').addEventListener('click', e => {
   const btn = e.target.closest('button'); if (btn) setTool(btn.dataset.tool);
 });
@@ -2264,11 +2279,11 @@ window.addEventListener('keydown', e => {
   if (!work) return;
   const meta = e.metaKey || e.ctrlKey;
   if (meta && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redoOp() : undo(); return; }
-  // P = pan, Z = zoom — but never while typing a note or a value
+  // single-letter tool shortcuts (TOOL_KEYS) — but never while typing a note or a value
   const typing = e.target.closest && e.target.closest('input, textarea, select, [contenteditable]');
   if (!meta && !e.altKey && !typing && editing < 0) {
     const k = e.key.toLowerCase();
-    if (k === 'p' || k === 'z') { e.preventDefault(); setTool(k === 'p' ? 'pan' : 'zoom'); return; }
+    if (TOOL_KEYS[k]) { e.preventDefault(); setTool(TOOL_KEYS[k]); return; }
   }
   if (!band) return;
   const step = e.shiftKey ? 10 : 1;
