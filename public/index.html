@@ -155,6 +155,8 @@
   .tool.on svg{color:var(--accent)}
   #stage.panning canvas{cursor:grab}
   #stage.panning.grabbing canvas{cursor:grabbing}
+  #stage.zooming canvas{cursor:zoom-in}
+  #stage.zooming.grabbing canvas{cursor:ns-resize}
 
   /* ---------- colour + size row for the selected mark ---------- */
   /* all eight colours have to be reachable without a scroll on a 390px phone */
@@ -373,7 +375,10 @@
       <button class="tool" data-tool="blur">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2s-6 6.6-6 11a6 6 0 0 0 12 0c0-4.4-6-11-6-11Z"/><path d="M9.2 14.6a2.9 2.9 0 0 0 2.8 2.8" opacity=".55"/></svg>Blur
       </button>
-      <button class="tool" data-tool="pan" title="Pan: scroll or drag to move around">
+      <button class="tool" data-tool="zoom" title="Zoom (Z): scroll or drag up/down to zoom in and out">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.4 15.4 5 5M10.5 7.8v5.4M7.8 10.5h5.4"/></svg>Zoom
+      </button>
+      <button class="tool" data-tool="pan" title="Pan (P): scroll or drag to move around">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.5V6a1.5 1.5 0 0 1 3 0v5.5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V5.5a1.5 1.5 0 0 1 3 0V12M17 9.5a1.5 1.5 0 0 1 3 0V15a6.5 6.5 0 0 1-6.5 6.5h-1.2a6 6 0 0 1-4.6-2.2L4.3 15.4a1.5 1.5 0 0 1 2.2-2L8 15"/></svg>Pan
       </button>
     </div>
@@ -493,7 +498,7 @@ let work     = null;      // canvas after all applied cuts
 let ops      = [];        // [{axis,a,b,style,color,lineWidth}] applied in order
 let annos    = [];        // live marks, in work-image pixels, drawn over the top
 let sel      = -1;        // index of the selected mark, -1 for none
-let tool     = 'cut';     // cut | rect | ellipse | arrow | text | blur | pan
+let tool     = 'cut';     // cut | rect | ellipse | arrow | text | blur | zoom | pan
 let band     = null;      // {axis:'v'|'h', a, b} in CURRENT work-image pixels
 let srcMime  = 'image/png';
 let srcName  = 'cutout';
@@ -1636,6 +1641,10 @@ viewC.addEventListener('pointerdown', e => {
     stage.classList.add('grabbing');
     return;
   }
+  if (tool === 'zoom') {
+    drag = { mode: 'zoom', sx: p.x, sy: p.y, s0: view.scale, ix: toImgX(p.x), iy: toImgY(p.y), moved: false, out: e.altKey || e.shiftKey };
+    return;
+  }
   const ix = toImgX(p.x), iy = toImgY(p.y);
 
   // 1. a handle on the selected mark always wins
@@ -1754,6 +1763,14 @@ viewC.addEventListener('pointermove', e => {
     view.ty = drag.ty0 + p.y - drag.sy;
     clampView(); render(); return;
   }
+  // zoom tool: drag up = in, down = out, anchored on where you pressed
+  if (drag.mode === 'zoom') {
+    const dy = p.y - drag.sy;
+    if (!drag.moved && Math.abs(dy) < 4) return;
+    if (!drag.moved) { drag.moved = true; stage.classList.add('grabbing'); }
+    zoomAt(drag.sx, drag.sy, drag.s0 * Math.exp(-dy * .01) / view.scale, drag.ix, drag.iy);
+    return;
+  }
 
   const ix = toImgX(p.x), iy = toImgY(p.y);
 
@@ -1854,6 +1871,11 @@ function endPointer(e) {
     hideLoupe();
 
     if (drag && drag.mode === 'pan') { drag = null; stage.classList.remove('grabbing'); return; }
+    if (drag && drag.mode === 'zoom') {
+      // a click without a drag steps in (alt/shift-click steps out)
+      if (!drag.moved) zoomAt(drag.sx, drag.sy, drag.out ? .5 : 2);
+      drag = null; stage.classList.remove('grabbing'); return;
+    }
 
     if (drag && drag.mode === 'paint') {
       drag = null; brushAt = null;
@@ -1942,14 +1964,17 @@ stage.addEventListener('wheel', e => {
     clampView(); render(); return;
   }
   const p = localPt(e);
-  const k = Math.exp(-e.deltaY * (e.ctrlKey ? .01 : .0022));
-  const ix = toImgX(p.x), iy = toImgY(p.y);
+  zoomAt(p.x, p.y, Math.exp(-e.deltaY * (e.ctrlKey ? .01 : .0022)));
+}, { passive: false });
+
+/// Scale the view by k, keeping image point (ix,iy) — by default whatever is under (x,y) — under (x,y).
+function zoomAt(x, y, k, ix = toImgX(x), iy = toImgY(y)) {
   view.scale *= k;
   clampView();
-  view.tx = p.x - ix * view.scale;
-  view.ty = p.y - iy * view.scale;
+  view.tx = x - ix * view.scale;
+  view.ty = y - iy * view.scale;
   clampView(); render();
-}, { passive: false });
+}
 
 /* ══════════════════════════════════════════════════════════════
    UI wiring
@@ -2005,18 +2030,22 @@ function scheduleBake() {
 
 /* ---- tools ---- */
 $('toolStrip').addEventListener('click', e => {
-  const btn = e.target.closest('button'); if (!btn) return;
-  tool = btn.dataset.tool;
+  const btn = e.target.closest('button'); if (btn) setTool(btn.dataset.tool);
+});
+function setTool(t) {
+  tool = t;
   if (tool !== 'cut') band = null;
   stage.classList.toggle('panning', tool === 'pan');
+  stage.classList.toggle('zooming', tool === 'zoom');
   sel = -1;
   render(); syncUI();
   hint(tool === 'cut' ? 'Drag across the part you want gone.'
      : tool === 'text' ? 'Tap where the note should go.'
      : tool === 'blur' ? 'Brush over anything to blur it. Tap a blur to change it.'
      : tool === 'pan' ? 'Scroll or drag to move around. Pinch or ctrl+scroll to zoom.'
+     : tool === 'zoom' ? 'Scroll or drag up/down to zoom. Click to zoom in, alt-click to zoom out.'
      : 'Drag to draw. Tap a mark to select it.', 2400);
-});
+}
 
 /* ---- colour ---- */
 for (const c of PALETTE) {
@@ -2235,6 +2264,12 @@ window.addEventListener('keydown', e => {
   if (!work) return;
   const meta = e.metaKey || e.ctrlKey;
   if (meta && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redoOp() : undo(); return; }
+  // P = pan, Z = zoom — but never while typing a note or a value
+  const typing = e.target.closest && e.target.closest('input, textarea, select, [contenteditable]');
+  if (!meta && !e.altKey && !typing && editing < 0) {
+    const k = e.key.toLowerCase();
+    if (k === 'p' || k === 'z') { e.preventDefault(); setTool(k === 'p' ? 'pan' : 'zoom'); return; }
+  }
   if (!band) return;
   const step = e.shiftKey ? 10 : 1;
   if (e.key === 'ArrowLeft' || e.key === 'ArrowUp')    { e.preventDefault(); nudge(e.altKey ? 'a' : 'b', -step); }
