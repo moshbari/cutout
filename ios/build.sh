@@ -71,6 +71,7 @@ cat > "$BUILD/ExportOptions.plist" <<EOF
 	<key>provisioningProfiles</key>
 	<dict>
 		<key>com.zpresso.cutout</key><string>CutOut App Store</string>
+		<key>com.zpresso.cutout.share</key><string>CutOut Share App Store</string>
 	</dict>
 </dict>
 </plist>

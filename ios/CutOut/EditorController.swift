@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 final class EditorController: UIViewController {
 
     private var web: WKWebView!
+    private var pageReady = false
     private let background = UIColor(red: 0.055, green: 0.063, blue: 0.078, alpha: 1)
 
     // MARK: - lifecycle
@@ -57,6 +58,21 @@ final class EditorController: UIViewController {
         // Served through our own scheme rather than file:// — WebKit refuses module
         // scripts and workers from file URLs, and the PDF reader (pdf.js) needs both.
         web.load(URLRequest(url: URL(string: "\(BundleSchemeHandler.scheme)://app/index.html")!))
+
+        // a picture shared in from Photos / Files lands in the shared inbox and
+        // opens CutOut — look there every time the app comes to the front
+        NotificationCenter.default.addObserver(self, selector: #selector(checkInbox),
+                                               name: UIApplication.didBecomeActiveNotification, object: nil)
+    }
+
+    /// Loads whatever the Share extension left for us (newest share only).
+    @objc private func checkInbox() {
+        guard pageReady else { return }               // didFinish calls this again once the page is up
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let item = SharedInbox.take() else { return }
+            self.deliverAny(item.data, type: item.mime == "application/pdf" ? .pdf
+                            : UTType(mimeType: item.mime) ?? .png, name: item.name)
+        }
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
@@ -133,6 +149,12 @@ extension EditorController: UIDocumentPickerDelegate {
                 self.report(false, "That file could not be opened.")
                 return
             }
+            self.deliverAny(data, type: type, name: name)
+        }
+    }
+
+    /// PDF, PNG and JPEG go to the page as they are; anything else is re-encoded once as PNG.
+    fileprivate func deliverAny(_ data: Data, type: UTType, name: String) {
             if type.conforms(to: .pdf) {
                 self.deliver(data, mime: "application/pdf", name: name)
             } else if type.conforms(to: .png) {
@@ -144,7 +166,6 @@ extension EditorController: UIDocumentPickerDelegate {
             } else {
                 self.report(false, "That file could not be opened.")
             }
-        }
     }
 
     /// iPad shows sheets as popovers, which need somewhere to point.
@@ -269,6 +290,8 @@ extension EditorController {
 extension EditorController: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        pageReady = true
+        checkInbox()
         #if DEBUG
         if let shot = DemoMode.shot {
             if shot == 9 || shot == 10 { deliver(DemoMode.samplePdf(), mime: "application/pdf", name: "Q3 Report") }

@@ -639,14 +639,21 @@ async function decodeImage(file, heic) {
   return heicTo({ blob: file, type: 'bitmap' });               // libheif applies the rotation itself
 }
 
-async function loadFile(file) {
+/* `restore` = the edits remembered from last time (see "remembered session");
+   omitted for a fresh open. Every open bumps loadGen, so a slow open that has
+   been overtaken by a newer one (a picture shared in while the last session was
+   still coming back) quietly gives up instead of replacing it. */
+let loadGen = 0;
+async function loadFile(file, restore) {
   if (!file) return;
-  if (await isPdfFile(file)) return loadPdf(file);
+  const my = ++loadGen;
+  if (await isPdfFile(file)) return loadPdf(file, restore, my);
   const heic = await isHeicFile(file);
   if (!heic && !file.type.startsWith('image/')) { hint('That is not an image.'); return; }
   busy(true, 'opening…');
   try {
     const bmp = await decodeImage(file, heic);
+    if (my !== loadGen) { bmp.close && bmp.close(); return; }
 
     original = makeCanvas(bmp.width, bmp.height);
     original.getContext('2d').drawImage(bmp, 0, 0);
@@ -660,13 +667,21 @@ async function loadFile(file) {
     syncPager();
     ops = []; annos = []; sel = -1; band = null;
     past.length = 0; future.length = 0;
+    if (restore && !restore.pdf) {
+      ops = restore.ops || []; annos = restore.annos || [];
+      past.push(...(restore.past || [])); future.push(...(restore.future || []));
+    }
     rebuild();
     // reveal the toolbar first — fitView has to measure the stage at its final height
     emptyEl.classList.add('hidden');
     tools.classList.remove('hidden');
     resize();
     fitView();
-    hint('Drag one finger across the part you want gone.', 4200);
+    if (restore) hint('Your last picture is back, just as you left it.', 3000);
+    else {
+      hint('Drag one finger across the part you want gone.', 4200);
+      rememberFile(file);
+    }
   } catch (e) {
     hint('Could not open that image.');
     console.error(e);
@@ -767,7 +782,7 @@ function syncPager() {
   $('pgNext').disabled = doc.index === doc.pages.length - 1;
 }
 
-async function loadPdf(file) {
+async function loadPdf(file, restore, my) {
   busy(true, 'opening PDF…');
   try {
     const pdfjs = await loadPdfLib();
@@ -776,17 +791,29 @@ async function loadPdf(file) {
       cMapUrl: PDFJS + 'cmaps/', cMapPacked: true,
       standardFontDataUrl: PDFJS + 'standard_fonts/',
     }).promise;
+    if (my !== loadGen) { pdf.destroy(); return; }
     if (doc) doc.pdf.destroy();
     doc = { pdf, index: 0, pages: Array.from({ length: pdf.numPages }, () => ({ state: null, ptPerPx: 0.5 })) };
     srcMime = 'image/png';
     srcName = (file.name || 'document').replace(/\.[^.]+$/, '') || 'document';
-    usePage(await pageState(0));
+    if (restore && restore.pdf && Array.isArray(restore.pages)) {
+      restore.pages.forEach((st, i) => {
+        if (st && doc.pages[i]) doc.pages[i].state = {
+          original: null, ops: st.ops || [], annos: st.annos || [], past: st.past || [], future: st.future || [] };
+      });
+      doc.index = clamp(restore.index | 0, 0, pdf.numPages - 1);
+    }
+    usePage(await pageState(doc.index));
     emptyEl.classList.add('hidden');
     tools.classList.remove('hidden');
     resize(); fitView(); syncPager();
-    hint(pdf.numPages > 1
-      ? `${pdf.numPages} pages. Edit any of them, then press PDF to save them all.`
-      : 'Edit the page, then press PDF to save it.', 4500);
+    if (restore) hint('Your last PDF is back, just as you left it.', 3000);
+    else {
+      hint(pdf.numPages > 1
+        ? `${pdf.numPages} pages. Edit any of them, then press PDF to save them all.`
+        : 'Edit the page, then press PDF to save it.', 4500);
+      rememberFile(file);
+    }
   } catch (e) {
     console.error(e);
     hint(e && e.name === 'PasswordException' ? 'That PDF is locked with a password.' : 'Could not open that PDF.');
@@ -1439,6 +1466,7 @@ function clampView() {
 }
 
 function render() {
+  persistSoon();
   if (!work) { vctx.clearRect(0, 0, viewC.width, viewC.height); return; }
   const { w, h } = stageSize();
   const img = showOriginal ? original : work;
@@ -2424,6 +2452,7 @@ async function savePdf() {
   if (editing >= 0) closeText(true);
   const cur = doc.index, out = [];
   stashPage();
+  persistPaused = true;
   try {
     for (let i = 0; i < doc.pages.length; i++) {
       busy(true, `making PDF… page ${i + 1} of ${doc.pages.length}`);
@@ -2438,6 +2467,7 @@ async function savePdf() {
     out.length = 0;
   }
   usePage(await pageState(cur));
+  persistPaused = false;
   busy(false);
   render(); syncUI();
   if (out.length) deliverFile(makePdf(out), `${srcName}-edited.pdf`, 'application/pdf', 'pdf', 'PDF document');
@@ -2445,6 +2475,83 @@ async function savePdf() {
 $('btnPdf').addEventListener('click', savePdf);
 $('pgPrev').addEventListener('click', () => doc && showPage(doc.index - 1));
 $('pgNext').addEventListener('click', () => doc && showPage(doc.index + 1));
+
+/* ══════════════════════════════════════════════════════════════
+   remembered session — the last picture (or PDF) and every edit on it are
+   kept in IndexedDB, so closing the app by mistake, or iOS throwing it out of
+   memory, never loses the work. Opening the app brings it straight back.
+   The file's bytes are written once when it is opened; the edits (cuts, marks,
+   undo history, which PDF page) are re-written shortly after every change and
+   immediately whenever the app goes to the background.
+   ══════════════════════════════════════════════════════════════ */
+const SESSION = (() => {
+  if (HOSTED || !window.indexedDB) return null;    // hosted: the other app owns the picture
+  let dbp = null;
+  const db = () => dbp || (dbp = new Promise((ok, fail) => {
+    const r = indexedDB.open('cutout', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => { dbp = null; fail(r.error); };
+  }));
+  const run = async (mode, fn) => {
+    const d = await db();
+    return new Promise((ok, fail) => {
+      const t = d.transaction('kv', mode), req = fn(t.objectStore('kv'));
+      t.oncomplete = () => ok(req && req.result);
+      t.onerror = t.onabort = () => fail(t.error);
+    });
+  };
+  return {
+    get: k => run('readonly', s => s.get(k)),
+    put: obj => run('readwrite', s => { for (const k in obj) s.put(obj[k], k); }),
+  };
+})();
+
+function sessionEdits() {
+  if (!original) return null;
+  const now = { ops, annos, past, future };
+  if (!doc) return clone(now);
+  return clone({
+    pdf: true, index: doc.index,
+    pages: doc.pages.map((p, i) => i === doc.index ? now
+      : p.state && { ops: p.state.ops, annos: p.state.annos, past: p.state.past, future: p.state.future }),
+  });
+}
+
+async function rememberFile(file) {
+  if (!SESSION) return;
+  try {
+    // bytes, not the Blob itself: older WebKit could not keep Blobs in IndexedDB
+    const bytes = await file.arrayBuffer();
+    await SESSION.put({ file: { bytes, name: file.name || 'image', type: file.type || '' }, edits: sessionEdits() });
+  } catch (e) { console.warn('could not remember the picture', e); }
+}
+
+let persistT = 0;
+let persistPaused = false;   // while a session comes back, or a PDF export swaps pages in and out
+function persistNow() {
+  clearTimeout(persistT); persistT = 0;
+  if (!SESSION || !original || persistPaused) return;
+  try { SESSION.put({ edits: sessionEdits() }).catch(() => {}); } catch {}
+}
+function persistSoon() {
+  if (!SESSION || !original || persistPaused) return;
+  clearTimeout(persistT);
+  persistT = setTimeout(persistNow, 600);
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) persistNow(); });
+window.addEventListener('pagehide', persistNow);
+
+async function restoreSession() {
+  if (!SESSION) return;
+  const gen = loadGen;
+  let f, edits;
+  try { [f, edits] = await Promise.all([SESSION.get('file'), SESSION.get('edits')]); } catch { return; }
+  if (!f || !f.bytes || loadGen !== gen) return;    // nothing kept, or something newer is opening
+  persistPaused = true;
+  try { await loadFile(new File([f.bytes], f.name, { type: f.type }), edits || {}); }
+  finally { persistPaused = false; }
+}
 
 /* ══════════════════════════════════════════════════════════════
    boot
@@ -2472,6 +2579,7 @@ if (HOSTED) {
   $('btnSave').textContent = 'Use this';
 }
 resize(); syncUI();
+restoreSession();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
